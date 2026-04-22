@@ -1,0 +1,15 @@
+export const ROUTES = {
+  LOGIN: '/login',
+  DASHBOARD: '/',
+  CASH_SHIFTS: '/caja',
+  SALES: '/ventas',
+  SALE_RETURNS: '/devoluciones',
+  PURCHASES: '/compras',
+  GOODS_RECEIPTS: '/recepciones',
+  ACCOUNTS_PAYABLE: '/cuentas-por-pagar',
+  PRODUCTS: '/productos',
+  INVENTORY: '/inventario',
+  SUPPLIERS: '/proveedores',
+  REPORTS: '/reportes',
+  SETTINGS: '/configuracion',
+} as const;

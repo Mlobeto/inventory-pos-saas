@@ -1,0 +1,715 @@
+// =============================================================================
+// schema.prisma — SaaS Multi-Tenant Inventory & POS
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// ENUMS
+// =============================================================================
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  INACTIVE
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum ProductType {
+  REVENTA
+  PERSONALIZADO
+}
+
+enum ProductCodeType {
+  INTERNAL       // código interno autogenerado
+  BARCODE        // código de barras del producto
+  SUPPLIER_CODE  // código del proveedor
+  CUSTOM         // código propio adicional
+}
+
+enum PurchaseStatus {
+  DRAFT               // borrador, no confirmada
+  CONFIRMED           // confirmada, pendiente de recepción
+  PARTIALLY_RECEIVED  // recepción parcial
+  FULLY_RECEIVED      // totalmente recibida
+  CANCELLED
+}
+
+enum GoodsReceiptStatus {
+  COMPLETE  // toda la mercadería recibida según compra
+  PARTIAL   // recepción parcial
+}
+
+enum StockMovementType {
+  INGRESO_COMPRA     // recepción de mercadería
+  VENTA              // descuento por venta
+  AJUSTE_POSITIVO    // ajuste manual positivo
+  AJUSTE_NEGATIVO    // ajuste manual negativo
+  DEVOLUCION_CLIENTE // reingreso por devolución de cliente
+  MERMA              // pérdida / daño
+  PERSONALIZACION    // consumo en proceso de personalización
+}
+
+enum CashShiftStatus {
+  OPEN
+  CLOSED
+}
+
+enum SaleStatus {
+  COMPLETED          // venta cerrada normalmente
+  CANCELLED          // venta anulada
+  PARTIALLY_RETURNED // devuelta parcialmente
+  FULLY_RETURNED     // devuelta en su totalidad
+}
+
+enum AccountsPayableStatus {
+  PENDING
+  PARTIAL
+  PAID
+  CANCELLED
+}
+
+enum SaleReturnType {
+  REFUND   // reintegro de dinero
+  EXCHANGE // cambio de producto
+}
+
+enum SaleReturnItemCondition {
+  GOOD     // producto en buen estado, puede reingresar a stock
+  DAMAGED  // producto dañado, no apto para reventa
+  UNUSABLE // producto inutilizable
+}
+
+// =============================================================================
+// TENANT — entidad raíz del modelo multi-tenant
+// =============================================================================
+
+model Tenant {
+  id        String       @id @default(cuid())
+  name      String
+  slug      String       @unique // identificador único, usado para subdomain o lookup
+  status    TenantStatus @default(ACTIVE)
+  settings  Json?        // feature flags y configuraciones futuras por tenant
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // soft delete
+
+  // relaciones
+  users            User[]
+  roles            Role[]
+  suppliers        Supplier[]
+  products         Product[]
+  paymentMethods   PaymentMethod[]
+  purchases        Purchase[]
+  goodsReceipts    GoodsReceipt[]
+  stockMovements   StockMovement[]
+  cashShifts       CashShift[]
+  sales            Sale[]
+  cashExpenses     CashExpense[]
+  accountsPayable  AccountsPayable[]
+  supplierPayments SupplierPayment[]
+  saleReturns      SaleReturn[]
+  sequences        TenantSequence[]
+}
+
+// =============================================================================
+// TENANT SEQUENCE — contadores por tenant para códigos correlativos
+// =============================================================================
+
+model TenantSequence {
+  tenantId  String
+  entity    String // "PRODUCT_CODE", "SALE_NUMBER"
+  lastValue Int    @default(0)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@id([tenantId, entity])
+  @@index([tenantId])
+}
+
+// =============================================================================
+// USER
+// =============================================================================
+
+model User {
+  id           String     @id @default(cuid())
+  tenantId     String
+  email        String
+  passwordHash String
+  firstName    String
+  lastName     String
+  status       UserStatus @default(ACTIVE)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  userRoles        UserRole[]
+  openedShifts     CashShift[]       @relation("ShiftOpenedBy")
+  closedShifts     CashShift[]       @relation("ShiftClosedBy")
+  sales            Sale[]
+  receivedReceipts GoodsReceipt[]
+  stockMovements   StockMovement[]
+  cashExpenses     CashExpense[]
+  supplierPayments SupplierPayment[]
+  processedReturns SaleReturn[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+}
+
+// =============================================================================
+// ROLE & PERMISSIONS
+// =============================================================================
+
+model Role {
+  id          String  @id @default(cuid())
+  tenantId    String
+  name        String
+  description String?
+  isSystem    Boolean @default(false) // los roles de sistema no pueden eliminarse
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id])
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+// Permission es global (no por tenant) — define el catálogo de permisos del sistema
+model Permission {
+  id          String  @id @default(cuid())
+  code        String  @unique // e.g. "sales:create", "reports:view"
+  description String?
+  module      String  // módulo al que pertenece
+
+  rolePermissions RolePermission[]
+}
+
+model RolePermission {
+  id           String @id @default(cuid())
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id])
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+}
+
+model UserRole {
+  id     String @id @default(cuid())
+  userId String
+  roleId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([userId])
+}
+
+// =============================================================================
+// SUPPLIER
+// =============================================================================
+
+model Supplier {
+  id        String  @id @default(cuid())
+  tenantId  String
+  name      String
+  taxId     String? // CUIT / RUT / NIF
+  phone     String?
+  email     String?
+  address   String?
+  notes     String?
+  isGeneric Boolean @default(false) // proveedor genérico / sin datos completos
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id])
+  purchases        Purchase[]
+  accountsPayable  AccountsPayable[]
+  supplierPayments SupplierPayment[]
+
+  @@index([tenantId])
+  @@index([tenantId, name])
+}
+
+// =============================================================================
+// PRODUCT
+// =============================================================================
+
+model Product {
+  id           String      @id @default(cuid())
+  tenantId     String
+  internalCode String      // correlativo autogenerado, único por tenant
+  name         String
+  description  String?
+  type         ProductType
+  unit         String      @default("UN") // UN, KG, L, etc.
+  currentStock Int         @default(0)    // denormalizado para rendimiento; siempre actualizar via tx
+  minStock     Int         @default(0)    // stock mínimo para alertas
+  isActive     Boolean     @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  tenant          Tenant               @relation(fields: [tenantId], references: [id])
+  productCodes    ProductCode[]
+  productPrices   ProductPrice[]
+  purchaseDetails PurchaseDetail[]
+  receiptDetails  GoodsReceiptDetail[]
+  stockMovements  StockMovement[]
+  saleDetails     SaleDetail[]
+  returnDetails   SaleReturnDetail[]
+
+  @@unique([tenantId, internalCode])
+  @@index([tenantId])
+  @@index([tenantId, isActive])
+  @@index([tenantId, type])
+}
+
+// =============================================================================
+// PRODUCT CODE — múltiples códigos por producto
+// =============================================================================
+
+model ProductCode {
+  id        String          @id @default(cuid())
+  tenantId  String
+  productId String
+  code      String
+  type      ProductCodeType
+  isPrimary Boolean         @default(false)
+
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, code, type])
+  @@index([tenantId, code])
+  @@index([productId])
+}
+
+// =============================================================================
+// PAYMENT METHOD — métodos de pago / listas de precio (por tenant)
+// =============================================================================
+
+model PaymentMethod {
+  id       String  @id @default(cuid())
+  tenantId String
+  name     String  // "Contado", "Tarjeta", "Mayorista"
+  code     String  // "CASH", "CARD", "WHOLESALE"
+  isActive Boolean @default(true)
+  sortOrder Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  productPrices ProductPrice[]
+  salePayments  SalePayment[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+}
+
+// =============================================================================
+// PRODUCT PRICE — precio por producto y método de pago (snapshot en venta)
+// =============================================================================
+
+model ProductPrice {
+  id              String  @id @default(cuid())
+  tenantId        String
+  productId       String
+  paymentMethodId String
+  price           Decimal @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product       Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  paymentMethod PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+
+  @@unique([productId, paymentMethodId])
+  @@index([tenantId, productId])
+}
+
+// =============================================================================
+// PURCHASE — orden de compra a proveedor
+// =============================================================================
+
+model Purchase {
+  id            String         @id @default(cuid())
+  tenantId      String
+  supplierId    String
+  invoiceNumber String?
+  invoiceDate   DateTime?
+  status        PurchaseStatus @default(DRAFT)
+  subtotal      Decimal        @db.Decimal(12, 2) @default(0)
+  totalAmount   Decimal        @db.Decimal(12, 2) @default(0)
+  notes         String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  tenant          Tenant            @relation(fields: [tenantId], references: [id])
+  supplier        Supplier          @relation(fields: [supplierId], references: [id])
+  details         PurchaseDetail[]
+  goodsReceipts   GoodsReceipt[]
+  accountsPayable AccountsPayable[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, supplierId])
+}
+
+model PurchaseDetail {
+  id              String  @id @default(cuid())
+  purchaseId      String
+  productId       String
+  quantityOrdered Int
+  unitCost        Decimal @db.Decimal(12, 2)
+  subtotal        Decimal @db.Decimal(12, 2)
+
+  purchase       Purchase             @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  product        Product              @relation(fields: [productId], references: [id])
+  receiptDetails GoodsReceiptDetail[]
+
+  @@index([purchaseId])
+  @@index([productId])
+}
+
+// =============================================================================
+// GOODS RECEIPT — recepción de mercadería
+// =============================================================================
+
+model GoodsReceipt {
+  id           String             @id @default(cuid())
+  tenantId     String
+  purchaseId   String
+  receivedById String
+  status       GoodsReceiptStatus @default(COMPLETE)
+  receivedAt   DateTime           @default(now())
+  notes        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant     Tenant               @relation(fields: [tenantId], references: [id])
+  purchase   Purchase             @relation(fields: [purchaseId], references: [id])
+  receivedBy User                 @relation(fields: [receivedById], references: [id])
+  details    GoodsReceiptDetail[]
+
+  @@index([tenantId])
+  @@index([purchaseId])
+}
+
+model GoodsReceiptDetail {
+  id               String  @id @default(cuid())
+  goodsReceiptId   String
+  purchaseDetailId String
+  productId        String
+  quantityExpected Int
+  quantityReceived Int
+  difference       Int     @default(0) // quantityReceived - quantityExpected (negativo = faltante)
+  unitCost         Decimal @db.Decimal(12, 2)
+  notes            String?
+
+  goodsReceipt   GoodsReceipt   @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  purchaseDetail PurchaseDetail @relation(fields: [purchaseDetailId], references: [id])
+  product        Product        @relation(fields: [productId], references: [id])
+
+  @@index([goodsReceiptId])
+  @@index([productId])
+}
+
+// =============================================================================
+// STOCK MOVEMENT — auditoría completa de movimientos de stock
+// =============================================================================
+
+model StockMovement {
+  id            String            @id @default(cuid())
+  tenantId      String
+  productId     String
+  type          StockMovementType
+  quantity      Int               // positivo = ingreso, negativo = egreso
+  stockBefore   Int
+  stockAfter    Int
+  unitCost      Decimal?          @db.Decimal(12, 2)
+  referenceType String?           // "GOODS_RECEIPT", "SALE", "SALE_RETURN", "ADJUSTMENT"
+  referenceId   String?           // ID del registro origen
+  notes         String?
+  createdById   String
+
+  createdAt DateTime @default(now())
+
+  tenant    Tenant  @relation(fields: [tenantId], references: [id])
+  product   Product @relation(fields: [productId], references: [id])
+  createdBy User    @relation(fields: [createdById], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, productId])
+  @@index([tenantId, type])
+  @@index([tenantId, createdAt])
+  @@index([referenceType, referenceId])
+}
+
+// =============================================================================
+// CASH SHIFT — turno de caja
+// =============================================================================
+
+model CashShift {
+  id                    String          @id @default(cuid())
+  tenantId              String
+  openedById            String
+  closedById            String?
+  status                CashShiftStatus @default(OPEN)
+  openedAt              DateTime        @default(now())
+  closedAt              DateTime?
+  initialAmount         Decimal         @db.Decimal(12, 2)
+  finalAmountDeclared   Decimal?        @db.Decimal(12, 2)
+  finalAmountCalculated Decimal?        @db.Decimal(12, 2)
+  difference            Decimal?        @db.Decimal(12, 2) // declarado - calculado
+  notes                 String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  openedBy     User          @relation("ShiftOpenedBy", fields: [openedById], references: [id])
+  closedBy     User?         @relation("ShiftClosedBy", fields: [closedById], references: [id])
+  sales        Sale[]
+  cashExpenses CashExpense[]
+  salePayments SalePayment[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, openedById])
+}
+
+// =============================================================================
+// SALE — venta
+// =============================================================================
+
+model Sale {
+  id             String     @id @default(cuid())
+  tenantId       String
+  cashShiftId    String
+  sellerId       String
+  saleNumber     String     // número correlativo por tenant
+  status         SaleStatus @default(COMPLETED)
+  subtotal       Decimal    @db.Decimal(12, 2)
+  discountAmount Decimal    @db.Decimal(12, 2) @default(0)
+  totalAmount    Decimal    @db.Decimal(12, 2)
+  notes          String?
+  cancelledAt    DateTime?
+  cancelReason   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  cashShift CashShift @relation(fields: [cashShiftId], references: [id])
+  seller    User      @relation(fields: [sellerId], references: [id])
+
+  details  SaleDetail[]
+  payments SalePayment[]
+  returns  SaleReturn[]
+
+  @@unique([tenantId, saleNumber])
+  @@index([tenantId])
+  @@index([tenantId, cashShiftId])
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, sellerId])
+}
+
+model SaleDetail {
+  id                  String  @id @default(cuid())
+  saleId              String
+  productId           String
+  quantity            Int
+  unitPrice           Decimal @db.Decimal(12, 2) // snapshot al momento de la venta
+  unitCost            Decimal @db.Decimal(12, 2) // snapshot para margen
+  discountAmount      Decimal @db.Decimal(12, 2) @default(0)
+  subtotal            Decimal @db.Decimal(12, 2)
+  appliedPriceListCode String  // código de la lista de precios aplicada (snapshot)
+
+  sale    Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  returnDetails SaleReturnDetail[]
+
+  @@index([saleId])
+  @@index([productId])
+}
+
+model SalePayment {
+  id              String  @id @default(cuid())
+  tenantId        String
+  saleId          String
+  cashShiftId     String
+  paymentMethodId String
+  amount          Decimal @db.Decimal(12, 2)
+  reference       String? // código de autorización tarjeta, ref transferencia, etc.
+
+  paidAt DateTime @default(now())
+
+  sale          Sale          @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  cashShift     CashShift     @relation(fields: [cashShiftId], references: [id])
+  paymentMethod PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+
+  @@index([tenantId])
+  @@index([saleId])
+  @@index([cashShiftId])
+}
+
+// =============================================================================
+// CASH EXPENSE — gastos registrados durante un turno de caja
+// =============================================================================
+
+model CashExpense {
+  id          String  @id @default(cuid())
+  tenantId    String
+  cashShiftId String
+  description String
+  amount      Decimal @db.Decimal(12, 2)
+  category    String?
+  createdById String
+
+  createdAt DateTime @default(now())
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  cashShift CashShift @relation(fields: [cashShiftId], references: [id])
+  createdBy User      @relation(fields: [createdById], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, cashShiftId])
+}
+
+// =============================================================================
+// ACCOUNTS PAYABLE — cuentas por pagar a proveedores
+// =============================================================================
+
+model AccountsPayable {
+  id              String                @id @default(cuid())
+  tenantId        String
+  supplierId      String
+  purchaseId      String?               // origen de la deuda (puede ser manual)
+  description     String
+  totalAmount     Decimal               @db.Decimal(12, 2)
+  paidAmount      Decimal               @db.Decimal(12, 2) @default(0)
+  remainingAmount Decimal               @db.Decimal(12, 2)
+  status          AccountsPayableStatus @default(PENDING)
+  dueDate         DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id])
+  supplier         Supplier          @relation(fields: [supplierId], references: [id])
+  purchase         Purchase?         @relation(fields: [purchaseId], references: [id])
+  supplierPayments SupplierPayment[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, supplierId])
+}
+
+// =============================================================================
+// SUPPLIER PAYMENT — pago a proveedor
+// =============================================================================
+
+model SupplierPayment {
+  id                String  @id @default(cuid())
+  tenantId          String
+  supplierId        String
+  accountsPayableId String
+  amount            Decimal @db.Decimal(12, 2)
+  paymentMethodDesc String  // descripción libre del método de pago
+  reference         String?
+  notes             String?
+  createdById       String
+
+  paidAt DateTime @default(now())
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id])
+  supplier        Supplier        @relation(fields: [supplierId], references: [id])
+  accountsPayable AccountsPayable @relation(fields: [accountsPayableId], references: [id])
+  createdBy       User            @relation(fields: [createdById], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, supplierId])
+  @@index([accountsPayableId])
+}
+
+// =============================================================================
+// SALE RETURN — devolución de venta
+// =============================================================================
+
+model SaleReturn {
+  id            String         @id @default(cuid())
+  tenantId      String
+  saleId        String
+  type          SaleReturnType
+  reason        String
+  totalAmount   Decimal        @db.Decimal(12, 2) // monto total devuelto
+  processedById String
+  cashShiftId   String?        // si aplica reintegro en efectivo
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant      Tenant           @relation(fields: [tenantId], references: [id])
+  sale        Sale             @relation(fields: [saleId], references: [id])
+  processedBy User             @relation(fields: [processedById], references: [id])
+  details     SaleReturnDetail[]
+
+  @@index([tenantId])
+  @@index([saleId])
+  @@index([tenantId, createdAt])
+}
+
+model SaleReturnDetail {
+  id               String                  @id @default(cuid())
+  saleReturnId     String
+  saleDetailId     String
+  productId        String
+  quantityReturned Int
+  unitPrice        Decimal                 @db.Decimal(12, 2) // snapshot
+  subtotal         Decimal                 @db.Decimal(12, 2)
+  condition        SaleReturnItemCondition @default(GOOD)
+  restockable      Boolean                 @default(true)
+  notes            String?
+
+  saleReturn SaleReturn @relation(fields: [saleReturnId], references: [id], onDelete: Cascade)
+  saleDetail SaleDetail @relation(fields: [saleDetailId], references: [id])
+  product    Product    @relation(fields: [productId], references: [id])
+
+  @@index([saleReturnId])
+  @@index([productId])
+}

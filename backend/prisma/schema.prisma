@@ -318,12 +318,13 @@ model ProductCode {
 // =============================================================================
 
 model PaymentMethod {
-  id       String  @id @default(cuid())
-  tenantId String
-  name     String  // "Contado", "Tarjeta", "Mayorista"
-  code     String  // "CASH", "CARD", "WHOLESALE"
-  isActive Boolean @default(true)
-  sortOrder Int    @default(0)
+  id           String  @id @default(cuid())
+  tenantId     String
+  name         String  // "Efectivo", "Tarjeta", "Mayorista"
+  code         String  // "CASH", "CARD", "WHOLESALE"
+  isActive     Boolean @default(true)
+  sortOrder    Int     @default(0)
+  isPriceTier  Boolean @default(false) // true = aparece como lista de precio en productos
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

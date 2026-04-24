@@ -55,7 +55,7 @@ cashShiftRouter.get('/current', requirePermission('cash-shifts:read'), asyncHand
   }
 
   // Calcular totales del turno en tiempo real
-  const [salesTotal, expensesTotal, paymentBreakdown] = await Promise.all([
+  const [salesTotal, expensesTotal, paymentBreakdown, allMethods] = await Promise.all([
     prisma.salePayment.aggregate({
       where: { cashShiftId: shift.id, tenantId: req.tenantId },
       _sum: { amount: true },
@@ -69,11 +69,20 @@ cashShiftRouter.get('/current', requirePermission('cash-shifts:read'), asyncHand
       where: { cashShiftId: shift.id, tenantId: req.tenantId },
       _sum: { amount: true },
     }),
+    prisma.paymentMethod.findMany({
+      where: { tenantId: req.tenantId, isActive: true },
+      select: { id: true, code: true, name: true },
+    }),
   ]);
 
   const totalSales = salesTotal._sum.amount ?? new Decimal(0);
   const totalExpenses = expensesTotal._sum.amount ?? new Decimal(0);
   const calculatedFinal = new Decimal(shift.initialAmount).add(totalSales).sub(totalExpenses);
+
+  const breakdownWithNames = paymentBreakdown.map((pb) => {
+    const method = allMethods.find((m) => m.id === pb.paymentMethodId);
+    return { ...pb, paymentMethodCode: method?.code ?? '', paymentMethodName: method?.name ?? '' };
+  });
 
   res.json(successResponse({
     ...shift,
@@ -81,7 +90,7 @@ cashShiftRouter.get('/current', requirePermission('cash-shifts:read'), asyncHand
       totalSales,
       totalExpenses,
       calculatedFinal,
-      paymentBreakdown,
+      paymentBreakdown: breakdownWithNames,
     },
   }));
 }));

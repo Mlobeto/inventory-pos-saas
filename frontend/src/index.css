@@ -7,3 +7,35 @@
     @apply text-gray-900 antialiased;
   }
 }
+
+@media print {
+  /* Ocultar chrome de la app */
+  aside,
+  header,
+  nav {
+    display: none !important;
+  }
+
+  /* El layout flex pasa a bloque */
+  .flex.h-screen {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* El contenido ocupa toda la hoja */
+  main {
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* Ocultar botones de acción dentro del modal de detalle */
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* Márgenes de página */
+  @page {
+    margin: 1.5cm;
+  }
+}

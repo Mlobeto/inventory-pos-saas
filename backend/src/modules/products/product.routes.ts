@@ -44,7 +44,7 @@ productRouter.get(
         orderBy: { name: 'asc' },
         include: {
           productCodes: { orderBy: { isPrimary: 'desc' } },
-          productPrices: { include: { paymentMethod: { select: { code: true, name: true } } } },
+          productPrices: { include: { paymentMethod: { select: { id: true, code: true, name: true } } } },
         },
       }),
       prisma.product.count({ where }),
@@ -79,7 +79,7 @@ productRouter.get(
       take: 10,
       include: {
         productCodes: true,
-        productPrices: { include: { paymentMethod: { select: { code: true, name: true } } } },
+        productPrices: { include: { paymentMethod: { select: { id: true, code: true, name: true } } } },
       },
     });
 
@@ -109,12 +109,13 @@ productRouter.post(
   '/',
   requirePermission('products:write'),
   asyncHandler(async (req, res) => {
-    const { name, description, type, unit, minStock } = req.body as {
+    const { name, description, type, unit, minStock, barcode } = req.body as {
       name: string;
       description?: string;
-      type: ProductType;
+      type?: ProductType;
       unit?: string;
       minStock?: number;
+      barcode?: string;
     };
 
     // Generar código correlativo en transacción atómica
@@ -127,16 +128,32 @@ productRouter.post(
 
       const internalCode = formatProductCode(seq.lastValue);
 
-      return tx.product.create({
+      const created = await tx.product.create({
         data: {
           tenantId: req.tenantId,
           internalCode,
           name,
           description,
-          type,
+          type: type ?? 'REVENTA',
           unit: unit ?? 'UN',
           minStock: minStock ?? 0,
         },
+      });
+
+      if (barcode?.trim()) {
+        await tx.productCode.create({
+          data: {
+            tenantId: req.tenantId,
+            productId: created.id,
+            code: barcode.trim(),
+            type: 'BARCODE',
+            isPrimary: true,
+          },
+        });
+      }
+
+      return tx.product.findUniqueOrThrow({
+        where: { id: created.id },
         include: { productCodes: true, productPrices: true },
       });
     });
@@ -155,12 +172,35 @@ productRouter.patch(
     });
     if (!existing) throw AppError.notFound('Producto');
 
-    const { name, description, unit, minStock, isActive } = req.body;
-    const updated = await prisma.product.update({
-      where: { id: req.params.id },
-      data: { name, description, unit, minStock, isActive },
-      include: { productCodes: true, productPrices: { include: { paymentMethod: true } } },
+    const { name, description, unit, minStock, isActive, barcode } = req.body;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const product = await tx.product.update({
+        where: { id: req.params.id },
+        data: { name, description, unit, minStock, isActive },
+        include: { productCodes: true, productPrices: { include: { paymentMethod: true } } },
+      });
+
+      if (barcode !== undefined) {
+        const trimmed = (barcode as string)?.trim() ?? '';
+        // Eliminar todos los barcodes primarios existentes del producto
+        await tx.productCode.deleteMany({
+          where: { productId: req.params.id, type: 'BARCODE', isPrimary: true },
+        });
+        if (trimmed) {
+          await tx.productCode.upsert({
+            where: { tenantId_code_type: { tenantId: req.tenantId, code: trimmed, type: 'BARCODE' } },
+            create: { tenantId: req.tenantId, productId: req.params.id, code: trimmed, type: 'BARCODE', isPrimary: true },
+            update: { productId: req.params.id, isPrimary: true },
+          });
+        }
+        // Re-fetch productCodes actualizado
+        product.productCodes = await tx.productCode.findMany({ where: { productId: req.params.id } });
+      }
+
+      return product;
     });
+
     res.json(successResponse(updated, 'Producto actualizado'));
   }),
 );

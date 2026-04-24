@@ -22,7 +22,8 @@ export function createApp(): express.Application {
         if (!origin || corsOrigins.includes(origin)) {
           cb(null, true);
         } else {
-          cb(new Error(`CORS: origin ${origin} no permitido`));
+          logger.warn(`CORS: origin ${origin} no permitido`);
+          cb(null, false);
         }
       },
       credentials: true,

@@ -6,12 +6,16 @@ import { Button } from '../../../shared/components/ui/Button';
 import { useLogin } from '../hooks/useLogin';
 
 const schema = z.object({
-  tenantSlug: z.string().min(1, 'Requerido'),
   email: z.string().email('Email inválido'),
   password: z.string().min(1, 'Requerido'),
 });
 
 type FormValues = z.infer<typeof schema>;
+
+/** Extrae el slug del dominio del email: admin@demo.com → "demo" */
+function slugFromEmail(email: string): string {
+  return email.split('@')[1]?.split('.')[0] ?? '';
+}
 
 interface LoginFormProps {
   onSuccess: () => void;
@@ -27,7 +31,7 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
   } = useForm<FormValues>({ resolver: zodResolver(schema) });
 
   function onSubmit(values: FormValues) {
-    mutate(values, { onSuccess });
+    mutate({ ...values, tenantSlug: slugFromEmail(values.email) }, { onSuccess });
   }
 
   const apiError =
@@ -37,12 +41,6 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-      <Input
-        label="Empresa (slug)"
-        placeholder="demo"
-        error={errors.tenantSlug?.message}
-        {...register('tenantSlug')}
-      />
       <Input
         label="Email"
         type="email"

@@ -95,6 +95,7 @@ async function main() {
 
   const cashierPermCodes = [
     'products:read',
+    'inventory:read',
     'cash-shifts:open',
     'cash-shifts:close',
     'cash-shifts:read',
@@ -138,12 +139,42 @@ async function main() {
   });
   console.log(`✅ Usuario admin: ${adminUser.email} / Admin1234!`);
 
+  // --- Usuario cajero ---
+  const cashierPasswordHash = await bcrypt.hash('Cajero1234!', 12);
+
+  const cashierUser = await prisma.user.upsert({
+    where: { tenantId_email: { tenantId: tenant.id, email: 'cajero@demo.com' } },
+    update: {},
+    create: {
+      tenantId: tenant.id,
+      email: 'cajero@demo.com',
+      passwordHash: cashierPasswordHash,
+      firstName: 'Cajero',
+      lastName: 'Demo',
+      status: UserStatus.ACTIVE,
+    },
+  });
+
+  await prisma.userRole.upsert({
+    where: { userId_roleId: { userId: cashierUser.id, roleId: cashierRole.id } },
+    update: {},
+    create: { userId: cashierUser.id, roleId: cashierRole.id },
+  });
+  console.log(`✅ Usuario cajero: ${cashierUser.email} / Cajero1234!`);
+
   // --- Métodos de pago por defecto ---
+  // isPriceTier=true → aparece como lista de precio en el formulario de productos
+  // isPriceTier=false → solo se usa para registrar el método de cobro en ventas
   const paymentMethods = [
-    { code: 'CASH',      name: 'Contado',    sortOrder: 1 },
-    { code: 'CARD',      name: 'Tarjeta',    sortOrder: 2 },
-    { code: 'WHOLESALE', name: 'Mayorista',  sortOrder: 3 },
-    { code: 'TRANSFER',  name: 'Transferencia', sortOrder: 4 },
+    { code: 'WHOLESALE',      name: 'Mayorista',              isPriceTier: true,  sortOrder: 1 },
+    { code: 'VENDEDOR',       name: 'Precio Vendedor',        isPriceTier: true,  sortOrder: 2 },
+    { code: 'CASH',           name: 'Efectivo',               isPriceTier: true,  sortOrder: 3 },
+    { code: 'PUBLIC',         name: 'Público Otros',          isPriceTier: true,  sortOrder: 4 },
+    { code: 'CARD',           name: 'Tarjeta',                isPriceTier: false, sortOrder: 5 },
+    { code: 'TRANSFER',       name: 'Transferencia',          isPriceTier: false, sortOrder: 6 },
+    { code: 'BNA',            name: 'BNA',                    isPriceTier: false, sortOrder: 7 },
+    { code: 'CUENTA_DNI',     name: 'Cuenta DNI',             isPriceTier: false, sortOrder: 8 },
+    { code: 'CREDIT_ACCOUNT', name: 'Cuenta Corriente',       isPriceTier: false, sortOrder: 9 },
   ];
 
   for (const pm of paymentMethods) {
@@ -187,7 +218,8 @@ async function main() {
 
   console.log('\n🎉 Seed completado exitosamente.');
   console.log('   Tenant slug: demo');
-  console.log('   Login: admin@demo.com / Admin1234!');
+  console.log('   Login admin:  admin@demo.com  / Admin1234!');
+  console.log('   Login cajero: cajero@demo.com / Cajero1234!');
 }
 
 main()

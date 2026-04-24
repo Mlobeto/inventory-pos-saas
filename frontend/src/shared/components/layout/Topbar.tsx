@@ -1,9 +1,9 @@
 import { Menu, LogOut, User } from 'lucide-react';
-import { useAuthStore } from '../../../../core/auth/authStore';
+import { useAuthStore } from '@/core/auth/authStore';
 import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { cn } from '../../utils/cn';
-import { ROUTES } from '../../../../router/routes';
+import { ROUTES } from '@/router/routes';
 
 interface TopbarProps {
   onMenuClick: () => void;

@@ -12,12 +12,19 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '../../utils/cn';
-import { useAuthStore } from '../../../../core/auth/authStore';
-import { ROUTES } from '../../../../router/routes';
+import { useAuthStore } from '@/core/auth/authStore';
+import { ROUTES } from '@/router/routes';
+
+interface NavItem {
+  to: string;
+  label: string;
+  icon: React.ElementType;
+  permission?: string;
+}
 
 interface NavGroup {
   label: string;
-  items: { to: string; label: string; icon: React.ElementType }[];
+  items: NavItem[];
 }
 
 const navGroups: NavGroup[] = [
@@ -28,32 +35,32 @@ const navGroups: NavGroup[] = [
   {
     label: 'Caja & Ventas',
     items: [
-      { to: ROUTES.CASH_SHIFTS, label: 'Turnos de Caja', icon: DollarSign },
-      { to: ROUTES.SALES, label: 'Ventas', icon: ShoppingCart },
-      { to: ROUTES.SALE_RETURNS, label: 'Devoluciones', icon: ArrowLeftRight },
+      { to: ROUTES.CASH_SHIFTS,  label: 'Turnos de Caja', icon: DollarSign,      permission: 'cash-shifts:read' },
+      { to: ROUTES.SALES,        label: 'Ventas',          icon: ShoppingCart,    permission: 'sales:read' },
+      { to: ROUTES.SALE_RETURNS, label: 'Devoluciones',    icon: ArrowLeftRight,  permission: 'sale-returns:write' },
     ],
   },
   {
     label: 'Compras',
     items: [
-      { to: ROUTES.PURCHASES, label: 'Órdenes de Compra', icon: Truck },
-      { to: ROUTES.GOODS_RECEIPTS, label: 'Recepciones', icon: Package },
-      { to: ROUTES.ACCOUNTS_PAYABLE, label: 'Cuentas por Pagar', icon: DollarSign },
+      { to: ROUTES.PURCHASES,       label: 'Órdenes de Compra', icon: Truck,    permission: 'purchases:read' },
+      { to: ROUTES.GOODS_RECEIPTS,  label: 'Recepciones',       icon: Package,  permission: 'purchases:read' },
+      { to: ROUTES.ACCOUNTS_PAYABLE,label: 'Cuentas por Pagar', icon: DollarSign, permission: 'accounts-payable:read' },
     ],
   },
   {
     label: 'Inventario',
     items: [
-      { to: ROUTES.PRODUCTS, label: 'Productos', icon: Layers },
-      { to: ROUTES.INVENTORY, label: 'Stock', icon: Package },
+      { to: ROUTES.PRODUCTS,  label: 'Productos', icon: Layers,  permission: 'products:read' },
+      { to: ROUTES.INVENTORY, label: 'Stock',     icon: Package, permission: 'inventory:read' },
     ],
   },
   {
     label: 'Administración',
     items: [
-      { to: ROUTES.SUPPLIERS, label: 'Proveedores', icon: Truck },
-      { to: ROUTES.REPORTS, label: 'Reportes', icon: BarChart2 },
-      { to: ROUTES.SETTINGS, label: 'Configuración', icon: Settings },
+      { to: ROUTES.SUPPLIERS, label: 'Proveedores',   icon: Truck,     permission: 'suppliers:read' },
+      { to: ROUTES.REPORTS,   label: 'Reportes',      icon: BarChart2, permission: 'reports:view' },
+      { to: ROUTES.SETTINGS,  label: 'Configuración', icon: Settings,  permission: 'tenant:settings' },
     ],
   },
 ];
@@ -65,6 +72,14 @@ interface SidebarProps {
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const user = useAuthStore((s) => s.user);
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+
+  const visibleGroups = navGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => !item.permission || hasPermission(item.permission)),
+    }))
+    .filter((group) => group.items.length > 0);
 
   return (
     <>
@@ -86,7 +101,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700">
           <div>
-            <p className="font-bold text-base leading-tight">Inventario POS</p>
+            <p className="font-bold text-base leading-tight">Dale Vir!</p>
             <p className="text-xs text-gray-400 mt-0.5">{user?.tenantSlug ?? ''}</p>
           </div>
           <button onClick={onClose} className="lg:hidden text-gray-400 hover:text-white">
@@ -96,7 +111,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
-          {navGroups.map((group) => (
+          {visibleGroups.map((group) => (
             <div key={group.label}>
               <p className="px-3 mb-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                 {group.label}

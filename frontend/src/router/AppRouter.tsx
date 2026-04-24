@@ -8,6 +8,16 @@ import { Spinner } from '../shared/components/ui/Spinner';
 const LoginPage = lazy(() => import('../modules/auth/pages/LoginPage'));
 const DashboardPage = lazy(() => import('../modules/dashboard/pages/DashboardPage'));
 const StubPage = lazy(() => import('../modules/stub/StubPage'));
+const SuppliersPage = lazy(() => import('../modules/suppliers/pages/SuppliersPage'));
+const ProductsPage = lazy(() => import('../modules/products/pages/ProductsPage'));
+const PurchasesListPage = lazy(() => import('../modules/purchases/pages/PurchasesListPage'));
+const PurchaseNewPage = lazy(() => import('../modules/purchases/pages/PurchaseNewPage'));
+const PurchaseDetailPage = lazy(() => import('../modules/purchases/pages/PurchaseDetailPage'));
+const GoodsReceiptNewPage = lazy(() => import('../modules/goods-receipts/pages/GoodsReceiptNewPage'));
+const GoodsReceiptDetailPage = lazy(() => import('../modules/goods-receipts/pages/GoodsReceiptDetailPage'));
+const CashShiftPage = lazy(() => import('../modules/cash-shifts/pages/CashShiftPage'));
+const SalesListPage = lazy(() => import('../modules/sales/pages/SalesListPage'));
+const SaleNewPage = lazy(() => import('../modules/sales/pages/SaleNewPage'));
 
 function PageLoader() {
   return (
@@ -31,15 +41,20 @@ export default function AppRouter() {
           }
         >
           <Route index element={<DashboardPage />} />
-          <Route path={ROUTES.CASH_SHIFTS} element={<StubPage title="Turnos de Caja" />} />
-          <Route path={ROUTES.SALES} element={<StubPage title="Ventas" />} />
+          <Route path={ROUTES.CASH_SHIFTS} element={<CashShiftPage />} />
+          <Route path={ROUTES.SALES_NEW} element={<SaleNewPage />} />
+          <Route path={ROUTES.SALES} element={<SalesListPage />} />
           <Route path={ROUTES.SALE_RETURNS} element={<StubPage title="Devoluciones" />} />
-          <Route path={ROUTES.PURCHASES} element={<StubPage title="Compras" />} />
+          <Route path={ROUTES.PURCHASES} element={<PurchasesListPage />} />
+          <Route path={ROUTES.PURCHASES_NEW} element={<PurchaseNewPage />} />
+          <Route path={ROUTES.PURCHASES_DETAIL} element={<PurchaseDetailPage />} />
+          <Route path={ROUTES.GOODS_RECEIPTS_NEW} element={<GoodsReceiptNewPage />} />
+          <Route path={ROUTES.GOODS_RECEIPTS_DETAIL} element={<GoodsReceiptDetailPage />} />
           <Route path={ROUTES.GOODS_RECEIPTS} element={<StubPage title="Recepciones" />} />
           <Route path={ROUTES.ACCOUNTS_PAYABLE} element={<StubPage title="Cuentas por Pagar" />} />
-          <Route path={ROUTES.PRODUCTS} element={<StubPage title="Productos" />} />
+          <Route path={ROUTES.PRODUCTS} element={<ProductsPage />} />
           <Route path={ROUTES.INVENTORY} element={<StubPage title="Inventario" />} />
-          <Route path={ROUTES.SUPPLIERS} element={<StubPage title="Proveedores" />} />
+          <Route path={ROUTES.SUPPLIERS} element={<SuppliersPage />} />
           <Route path={ROUTES.REPORTS} element={<StubPage title="Reportes" />} />
           <Route path={ROUTES.SETTINGS} element={<StubPage title="Configuración" />} />
         </Route>

@@ -52,7 +52,11 @@ export function errorHandler(
   }
 
   // Error desconocido — log completo, respuesta genérica
-  logger.error('Unhandled error', { error: err });
+  logger.error('Unhandled error', {
+    message: err instanceof Error ? err.message : String(err),
+    stack: err instanceof Error ? err.stack : undefined,
+    error: err,
+  });
   res.status(500).json(
     errorResponse('Error interno del servidor', ErrorCode.INTERNAL_ERROR),
   );

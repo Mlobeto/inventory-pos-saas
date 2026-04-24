@@ -66,7 +66,7 @@ reportsRouter.get('/stock', asyncHandler(async (req, res) => {
     where: {
       tenantId: req.tenantId,
       deletedAt: null,
-      ...(lowStock && { currentStock: { lte: prisma.product.fields.minStock } }),
+      ...(lowStock && { currentStock: { lte: 5 } }),
     },
     select: {
       id: true,

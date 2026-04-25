@@ -46,6 +46,8 @@ async function main() {
     { code: 'sale-returns:write',      module: 'sale-returns',      description: 'Registrar devoluciones' },
     { code: 'reports:view',            module: 'reports',           description: 'Ver reportes' },
     { code: 'tenant:settings',         module: 'tenant',            description: 'Configurar el negocio' },
+    { code: 'customers:read',          module: 'customers',         description: 'Ver clientes' },
+    { code: 'customers:write',         module: 'customers',         description: 'Crear y editar clientes' },
   ];
 
   for (const perm of permissionDefs) {
@@ -103,6 +105,7 @@ async function main() {
     'sales:read',
     'cash-expenses:write',
     'sale-returns:write',
+    'customers:read',
   ];
 
   for (const code of cashierPermCodes) {

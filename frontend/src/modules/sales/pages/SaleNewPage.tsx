@@ -3,10 +3,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   Search, Plus, Minus, Trash2, CheckCircle, AlertCircle,
-  ShoppingCart, Clock, ChevronDown, Printer,
+  ShoppingCart, Clock, ChevronDown, Printer, UserRound, X, UserPlus,
 } from 'lucide-react';
 import { createSale, type Sale } from '../api/salesApi';
 import { searchProducts, type Product } from '@/modules/products/api/productsApi';
+import { searchCustomers, createCustomer, CUSTOMER_TYPE_LABELS, type Customer as CustomerRecord, type CustomerType, type CreateCustomerDto } from '@/modules/customers/api/customersApi';
 import {
   getPaymentMethods,
   getPriceTierMethods,
@@ -133,6 +134,24 @@ export default function SaleNewPage() {
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
   const [formError, setFormError] = useState('');
 
+  // Cliente
+  const [customerId, setCustomerId] = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerRecord | null>(null);
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false);
+  const [debouncedCustomerSearch, setDebouncedCustomerSearch] = useState('');
+  // Creación rápida de cliente
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+  const [quickCreateName, setQuickCreateName] = useState('');
+  const [quickCreateType, setQuickCreateType] = useState<CustomerType>('CONSUMIDOR_FINAL');
+  const [quickCreateLoading, setQuickCreateLoading] = useState(false);
+
+  // Búsqueda de clientes (debounce)
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedCustomerSearch(customerSearch), 300);
+    return () => clearTimeout(t);
+  }, [customerSearch]);
+
   // Búsqueda de productos
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -165,6 +184,13 @@ export default function SaleNewPage() {
     enabled: !!currentShift,
   });
 
+  const { data: customerResults = [] } = useQuery({
+    queryKey: ['customers-search', debouncedCustomerSearch],
+    queryFn: () => searchCustomers(debouncedCustomerSearch),
+    enabled: debouncedCustomerSearch.length >= 2 && !selectedCustomer,
+    staleTime: 15_000,
+  });
+
   const { data: searchResults = [], isFetching: searching } = useQuery({
     queryKey: ['products-search', debouncedQuery],
     queryFn: () => searchProducts(debouncedQuery),
@@ -175,11 +201,11 @@ export default function SaleNewPage() {
   // Métodos de pago disponibles para cobrar (no son listas de precio, salvo CASH)
   const paymentMethods = allMethods.filter((m) => !m.isPriceTier || m.code === 'CASH');
 
-  // Auto-seleccionar CASH como lista de precios por defecto
+  // Auto-seleccionar PUBLIC como lista de precios por defecto
   useEffect(() => {
     if (priceTierMethods.length > 0 && !priceListId) {
-      const cashMethod = priceTierMethods.find((m) => m.code === 'CASH') ?? priceTierMethods[0];
-      setPriceListId(cashMethod.id);
+      const publicMethod = priceTierMethods.find((m) => m.code === 'PUBLIC') ?? priceTierMethods.find((m) => m.code === 'CASH') ?? priceTierMethods[0];
+      setPriceListId(publicMethod.id);
     }
   }, [priceTierMethods, priceListId]);
 
@@ -219,6 +245,55 @@ export default function SaleNewPage() {
 
     setPayments([{ rowId: newRowId(), methodId: defaultMethod.id, amount: '', ref: '' }]);
   }, [priceListId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Cliente ────────────────────────────────────────────────────────────────
+  function handleCustomerSelect(c: CustomerRecord | null) {
+    setSelectedCustomer(c);
+    setCustomerId(c?.id ?? '');
+    setCustomerSearch(c ? c.name : '');
+    setCustomerDropdownOpen(false);
+    if (!c || priceTierMethods.length === 0) return;
+
+    // Auto-set precio
+    const tierCode =
+      c.type === 'VENDEDOR' ? 'VENDEDOR'
+      : c.type === 'MAYORISTA' ? 'WHOLESALE'
+      : 'PUBLIC';
+    const tier =
+      priceTierMethods.find((m) => m.code === tierCode) ??
+      priceTierMethods.find((m) => m.code === 'PUBLIC') ??
+      priceTierMethods[0];
+    if (tier) setPriceListId(tier.id);
+
+    // Auto-set método de pago
+    const payCode = c.type === 'VENDEDOR' ? 'CREDIT_ACCOUNT' : 'CASH';
+    const pm = paymentMethods.find((m) => m.code === payCode) ?? paymentMethods[0];
+    if (pm) setPayments([{ rowId: newRowId(), methodId: pm.id, amount: '', ref: '' }]);
+  }
+
+  // ─── Creación rápida de cliente ──────────────────────────────────────────────
+  function openQuickCreate() {
+    setQuickCreateName(customerSearch.trim());
+    setQuickCreateType('CONSUMIDOR_FINAL');
+    setCustomerDropdownOpen(false);
+    setQuickCreateOpen(true);
+  }
+
+  async function handleQuickCreate() {
+    if (!quickCreateName.trim()) return;
+    setQuickCreateLoading(true);
+    try {
+      const dto: CreateCustomerDto = { name: quickCreateName.trim(), type: quickCreateType };
+      const newCustomer = await createCustomer(dto);
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      handleCustomerSelect(newCustomer);
+      setQuickCreateOpen(false);
+    } catch {
+      // silently ignore — user can try again
+    } finally {
+      setQuickCreateLoading(false);
+    }
+  }
 
   // ─── Cálculos ────────────────────────────────────────────────────────────────
   const selectedPriceTier = priceTierMethods.find((m) => m.id === priceListId);
@@ -343,6 +418,16 @@ export default function SaleNewPage() {
     if (validPayments.length === 0) { setFormError('Registrá al menos un pago'); return; }
     if (remaining > 0.01) { setFormError(`Falta cobrar ${fmt(remaining)}`); return; }
 
+    // Advertencia: CREDIT_ACCOUNT requiere cliente
+    const hasCreditAccount = validPayments.some((p) => {
+      const pm = paymentMethods.find((m) => m.id === p.methodId);
+      return pm?.code === 'CREDIT_ACCOUNT';
+    });
+    if (hasCreditAccount && !customerId) {
+      setFormError('Cuenta corriente requiere seleccionar un cliente');
+      return;
+    }
+
     createMut.mutate({
       items: cart.map((item) => ({
         productId: item.productId,
@@ -359,6 +444,7 @@ export default function SaleNewPage() {
       })),
       notes: notes || undefined,
       discountAmount: discount || undefined,
+      customerId: customerId || undefined,
     });
   }
 
@@ -370,6 +456,10 @@ export default function SaleNewPage() {
     setFormError('');
     setSearchQuery('');
     methodsInitialized.current = false;
+    setCustomerId('');
+    setSelectedCustomer(null);
+    setCustomerSearch('');
+    setQuickCreateOpen(false);
     setPayments([
       {
         rowId: newRowId(),
@@ -404,26 +494,142 @@ export default function SaleNewPage() {
   return (
     <div>
       {/* ── Header ── */}
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <h1 className="text-xl font-bold text-gray-900">Nueva venta</h1>
 
-        {/* Selector de lista de precios */}
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-500 hidden sm:block">Lista de precios:</span>
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Selector de cliente */}
           <div className="relative">
-            <select
-              value={priceListId}
-              onChange={(e) => setPriceListId(e.target.value)}
-              className="appearance-none bg-brand-50 border border-brand-200 text-brand-800 text-sm font-semibold rounded-lg px-3 py-1.5 pr-8 focus:outline-none focus:ring-2 focus:ring-brand-500 cursor-pointer"
-            >
-              <option value="">Seleccionar...</option>
-              {priceTierMethods.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {getPriceTierLabel(m)}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-brand-600 pointer-events-none" />
+            <div className={`flex items-center border rounded-lg overflow-hidden bg-white shadow-sm ${selectedCustomer ? 'border-brand-400' : 'border-gray-300'}`}>
+              <UserRound className={`h-4 w-4 ml-3 flex-shrink-0 ${selectedCustomer ? 'text-brand-500' : 'text-gray-400'}`} />
+              <input
+                type="text"
+                placeholder="Consumidor Final (por defecto)..."
+                value={customerSearch}
+                onChange={(e) => {
+                  setCustomerSearch(e.target.value);
+                  if (selectedCustomer) {
+                    setSelectedCustomer(null);
+                    setCustomerId('');
+                  }
+                  setCustomerDropdownOpen(true);
+                  setQuickCreateOpen(false);
+                }}
+                onFocus={() => { if (!selectedCustomer) setCustomerDropdownOpen(true); }}
+                onBlur={() => setTimeout(() => { setCustomerDropdownOpen(false); }, 150)}
+                className="px-2 py-1.5 text-sm focus:outline-none w-52"
+              />
+              {selectedCustomer && (
+                <button
+                  type="button"
+                  onClick={() => handleCustomerSelect(null)}
+                  className="px-2 text-gray-400 hover:text-red-500"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Dropdown: resultados + opción crear */}
+            {customerDropdownOpen && !selectedCustomer && debouncedCustomerSearch.length >= 2 && (
+              <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 overflow-hidden">
+                {customerResults.length > 0 && (
+                  <div className="max-h-44 overflow-y-auto divide-y divide-gray-100">
+                    {customerResults.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onMouseDown={() => handleCustomerSelect(c)}
+                        className="w-full text-left px-3 py-2.5 text-sm hover:bg-brand-50 transition-colors"
+                      >
+                        <p className="font-medium text-gray-900">{c.name}</p>
+                        <p className="text-xs text-gray-400">{CUSTOMER_TYPE_LABELS[c.type]}{c.taxId ? ` · ${c.taxId}` : ''}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {customerResults.length === 0 && (
+                  <div className="px-3 py-2 text-xs text-gray-400">
+                    Sin resultados para "{debouncedCustomerSearch}"
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onMouseDown={openQuickCreate}
+                  className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-brand-600 hover:bg-brand-50 border-t border-gray-100 font-medium transition-colors"
+                >
+                  <UserPlus className="h-3.5 w-3.5" />
+                  Crear "{customerSearch.trim()}"
+                </button>
+              </div>
+            )}
+
+            {/* Formulario rápido de creación */}
+            {quickCreateOpen && (
+              <div className="absolute top-full left-0 mt-1 w-72 bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-3 space-y-3">
+                <p className="text-sm font-semibold text-gray-800">Nuevo cliente</p>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Nombre *</label>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={quickCreateName}
+                    onChange={(e) => setQuickCreateName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleQuickCreate(); if (e.key === 'Escape') setQuickCreateOpen(false); }}
+                    className="w-full border border-gray-300 rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Tipo</label>
+                  <select
+                    value={quickCreateType}
+                    onChange={(e) => setQuickCreateType(e.target.value as CustomerType)}
+                    className="w-full border border-gray-300 rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  >
+                    {(Object.keys(CUSTOMER_TYPE_LABELS) as CustomerType[]).map((k) => (
+                      <option key={k} value={k}>{CUSTOMER_TYPE_LABELS[k]}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setQuickCreateOpen(false)}
+                    className="flex-1 py-1.5 text-sm border border-gray-300 rounded-md text-gray-600 hover:bg-gray-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!quickCreateName.trim() || quickCreateLoading}
+                    onClick={handleQuickCreate}
+                    className="flex-1 py-1.5 text-sm bg-brand-600 text-white rounded-md hover:bg-brand-700 disabled:opacity-50 font-medium"
+                  >
+                    {quickCreateLoading ? 'Creando...' : 'Crear'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Selector de lista de precios */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-500 hidden sm:block">Lista de precios:</span>
+            <div className="relative">
+              <select
+                value={priceListId}
+                onChange={(e) => setPriceListId(e.target.value)}
+                className="appearance-none bg-brand-50 border border-brand-200 text-brand-800 text-sm font-semibold rounded-lg px-3 py-1.5 pr-8 focus:outline-none focus:ring-2 focus:ring-brand-500 cursor-pointer"
+              >
+                <option value="">Seleccionar...</option>
+                {priceTierMethods.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {getPriceTierLabel(m)}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-brand-600 pointer-events-none" />
+            </div>
           </div>
         </div>
       </div>

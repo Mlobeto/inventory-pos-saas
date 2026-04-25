@@ -66,6 +66,12 @@ function SaleDetailModal({
               <span className="text-gray-500">Vendedor:</span>{' '}
               <strong>{sale.seller.firstName} {sale.seller.lastName}</strong>
             </div>
+            {sale.customer && (
+              <div>
+                <span className="text-gray-500">Cliente:</span>{' '}
+                <strong>{sale.customer.name}</strong>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <span className="text-gray-500">Estado:</span>
               <Badge variant={STATUS_VARIANT[sale.status]}>{STATUS_LABELS[sale.status]}</Badge>
@@ -293,6 +299,11 @@ export default function SalesListPage() {
             key: 'seller',
             header: 'Vendedor',
             render: (r) => `${r.seller.firstName} ${r.seller.lastName}`,
+          },
+          {
+            key: 'customer',
+            header: 'Cliente',
+            render: (r) => r.customer?.name ?? <span className="text-gray-400 text-xs">—</span>,
           },
           {
             key: 'items',

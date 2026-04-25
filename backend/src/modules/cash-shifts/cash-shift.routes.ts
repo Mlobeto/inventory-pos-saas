@@ -84,12 +84,18 @@ cashShiftRouter.get('/current', requirePermission('cash-shifts:read'), asyncHand
     return { ...pb, paymentMethodCode: method?.code ?? '', paymentMethodName: method?.name ?? '' };
   });
 
+  // Efectivo calculado en caja = apertura + pagos en efectivo (CASH) - gastos
+  const cashMethodEntry = breakdownWithNames.find((b) => b.paymentMethodCode === 'CASH');
+  const cashSales = cashMethodEntry?._sum.amount ? new Decimal(cashMethodEntry._sum.amount) : new Decimal(0);
+  const calculatedCash = new Decimal(shift.initialAmount).add(cashSales).sub(totalExpenses);
+
   res.json(successResponse({
     ...shift,
     summary: {
       totalSales,
       totalExpenses,
       calculatedFinal,
+      calculatedCash,
       paymentBreakdown: breakdownWithNames,
     },
   }));
@@ -109,7 +115,7 @@ cashShiftRouter.post('/close', requirePermission('cash-shifts:close'), asyncHand
   if (!shift) throw AppError.shiftNotOpen();
 
   // Calcular monto final
-  const [salesTotal, expensesTotal] = await Promise.all([
+  const [salesTotal, expensesTotal, cashPaymentMethod] = await Promise.all([
     prisma.salePayment.aggregate({
       where: { cashShiftId: shift.id, tenantId: req.tenantId },
       _sum: { amount: true },
@@ -118,11 +124,23 @@ cashShiftRouter.post('/close', requirePermission('cash-shifts:close'), asyncHand
       where: { cashShiftId: shift.id, tenantId: req.tenantId },
       _sum: { amount: true },
     }),
+    prisma.paymentMethod.findFirst({
+      where: { tenantId: req.tenantId, code: 'CASH' },
+      select: { id: true },
+    }),
   ]);
 
-  const totalSales = salesTotal._sum.amount ?? new Decimal(0);
+  // Solo pagos en efectivo (CASH) se suman al saldo físico de caja
+  const cashSalesTotal = cashPaymentMethod
+    ? (await prisma.salePayment.aggregate({
+        where: { cashShiftId: shift.id, tenantId: req.tenantId, paymentMethodId: cashPaymentMethod.id },
+        _sum: { amount: true },
+      }))._sum.amount ?? new Decimal(0)
+    : new Decimal(0);
+
+  void (salesTotal._sum.amount ?? new Decimal(0)); // total ventas no se usa para el saldo físico de caja
   const totalExpenses = expensesTotal._sum.amount ?? new Decimal(0);
-  const finalAmountCalculated = new Decimal(shift.initialAmount).add(totalSales).sub(totalExpenses);
+  const finalAmountCalculated = new Decimal(shift.initialAmount).add(cashSalesTotal).sub(totalExpenses);
   const declared = new Decimal(finalAmountDeclared);
   const difference = declared.sub(finalAmountCalculated);
 

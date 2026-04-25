@@ -18,6 +18,7 @@ import { accountsPayableRouter } from '../modules/accounts-payable/accounts-paya
 import { supplierPaymentRouter } from '../modules/supplier-payments/supplier-payment.routes';
 import { saleReturnRouter } from '../modules/sale-returns/sale-return.routes';
 import { reportsRouter } from '../modules/reports/reports.routes';
+import { customerRouter } from '../modules/customers/customer.routes';
 
 const API_PREFIX = '/api';
 
@@ -35,6 +36,7 @@ export function registerRoutes(app: Application): void {
 
   // Maestros
   app.use(`${API_PREFIX}/suppliers`, supplierRouter);
+  app.use(`${API_PREFIX}/customers`, customerRouter);
   app.use(`${API_PREFIX}/products`, productRouter);
   app.use(`${API_PREFIX}/product-codes`, productCodeRouter);
   app.use(`${API_PREFIX}/product-prices`, productPriceRouter);

@@ -25,6 +25,7 @@ saleRouter.get('/', requirePermission('sales:read'), asyncHandler(async (req, re
       orderBy: { createdAt: 'desc' },
       include: {
         seller: { select: { firstName: true, lastName: true } },
+        customer: { select: { id: true, name: true, type: true } },
         payments: { include: { paymentMethod: { select: { code: true, name: true } } } },
         _count: { select: { details: true } },
       },
@@ -66,7 +67,7 @@ saleRouter.get('/:id', requirePermission('sales:read'), asyncHandler(async (req,
  * Todo en una sola transacción atómica.
  */
 saleRouter.post('/', requirePermission('sales:create'), asyncHandler(async (req, res) => {
-  const { items, payments, notes, discountAmount: saleDiscount } = req.body as {
+  const { items, payments, notes, discountAmount: saleDiscount, customerId } = req.body as {
     items: Array<{
       productId: string;
       quantity: number;
@@ -82,6 +83,7 @@ saleRouter.post('/', requirePermission('sales:create'), asyncHandler(async (req,
     }>;
     notes?: string;
     discountAmount?: number;
+    customerId?: string;
   };
 
   const userId = req.user!.sub;
@@ -120,6 +122,7 @@ saleRouter.post('/', requirePermission('sales:create'), asyncHandler(async (req,
         discountAmount: new Decimal(discountAmount),
         totalAmount: new Decimal(totalAmount),
         notes,
+        ...(customerId && { customerId }),
         details: {
           create: items.map((i) => ({
             productId: i.productId,

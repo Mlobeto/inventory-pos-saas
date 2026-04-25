@@ -192,12 +192,14 @@ function ActiveShiftPanel({
 function CloseShiftModal({
   isOpen,
   shift,
+  paymentMethods,
   onClose,
   onConfirm,
   isLoading,
 }: {
   isOpen: boolean;
   shift: CashShift | null;
+  paymentMethods: PaymentMethod[];
   onClose: () => void;
   onConfirm: (declared: number, notes: string) => void;
   isLoading: boolean;
@@ -207,8 +209,15 @@ function CloseShiftModal({
   const [error, setError] = useState('');
 
   if (!shift) return null;
-  const calculated = parseFloat(shift.summary?.calculatedFinal ?? '0');
-  const diff = parseFloat(declared || '0') - calculated;
+
+  // Efectivo calculado = apertura + ventas en CASH - gastos
+  const calculatedCash = parseFloat(shift.summary?.calculatedCash ?? shift.summary?.calculatedFinal ?? '0');
+  const diff = parseFloat(declared || '0') - calculatedCash;
+
+  // Métodos de pago no-priceTier con movimientos en este turno
+  const breakdown = shift.summary?.paymentBreakdown ?? [];
+  const nonCashBreakdown = breakdown.filter((b) => b.paymentMethodCode !== 'CASH');
+  const cashBreakdown = breakdown.find((b) => b.paymentMethodCode === 'CASH');
 
   function handleConfirm() {
     const val = parseFloat(declared);
@@ -219,22 +228,42 @@ function CloseShiftModal({
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Cerrar turno de caja" size="md">
       <div className="space-y-4">
+        {/* Resumen */}
         <div className="bg-gray-50 rounded-lg p-4 text-sm space-y-2">
           <div className="flex justify-between">
             <span className="text-gray-500">Efectivo de apertura</span>
             <span className="font-medium">{fmt(shift.initialAmount)}</span>
           </div>
+
+          {/* Ventas en efectivo */}
           <div className="flex justify-between">
-            <span className="text-gray-500">Total ventas</span>
-            <span className="font-medium text-green-600">{fmt(shift.summary?.totalSales)}</span>
+            <span className="text-gray-500">Ventas en efectivo</span>
+            <span className="font-medium text-green-600">{fmt(cashBreakdown?._sum.amount ?? '0')}</span>
           </div>
-          <div className="flex justify-between">
+
+          {/* Otros métodos de pago (no suman al saldo físico) */}
+          {nonCashBreakdown.length > 0 && (
+            <>
+              <div className="border-t border-gray-200 pt-2 pb-0.5">
+                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Otros cobros (no ingresan a caja)</span>
+              </div>
+              {nonCashBreakdown.map((b) => (
+                <div key={b.paymentMethodId} className="flex justify-between pl-2">
+                  <span className="text-gray-500">{b.paymentMethodName}</span>
+                  <span className="font-medium text-gray-700">{fmt(b._sum.amount)}</span>
+                </div>
+              ))}
+            </>
+          )}
+
+          <div className="flex justify-between border-t border-gray-200 pt-2">
             <span className="text-gray-500">Total gastos</span>
             <span className="font-medium text-red-500">{fmt(shift.summary?.totalExpenses)}</span>
           </div>
+
           <div className="flex justify-between border-t border-gray-200 pt-2">
-            <span className="font-semibold text-gray-700">Saldo calculado</span>
-            <span className="font-bold text-gray-900">{fmt(shift.summary?.calculatedFinal)}</span>
+            <span className="font-semibold text-gray-700">Efectivo calculado en caja</span>
+            <span className="font-bold text-gray-900">{fmt(calculatedCash)}</span>
           </div>
         </div>
 
@@ -578,6 +607,7 @@ export default function CashShiftPage() {
       <CloseShiftModal
         isOpen={showCloseModal}
         shift={currentShift ?? null}
+        paymentMethods={paymentMethods}
         onClose={() => setShowCloseModal(false)}
         onConfirm={(declared, notes) => closeMut.mutate({ declared, notes })}
         isLoading={closeMut.isPending}

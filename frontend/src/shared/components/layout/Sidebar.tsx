@@ -9,6 +9,7 @@ import {
   DollarSign,
   Layers,
   ArrowLeftRight,
+  Users,
   X,
 } from 'lucide-react';
 import { cn } from '../../utils/cn';
@@ -58,9 +59,10 @@ const navGroups: NavGroup[] = [
   {
     label: 'Administración',
     items: [
-      { to: ROUTES.SUPPLIERS, label: 'Proveedores',   icon: Truck,     permission: 'suppliers:read' },
-      { to: ROUTES.REPORTS,   label: 'Reportes',      icon: BarChart2, permission: 'reports:view' },
-      { to: ROUTES.SETTINGS,  label: 'Configuración', icon: Settings,  permission: 'tenant:settings' },
+      { to: ROUTES.SUPPLIERS,  label: 'Proveedores',   icon: Truck,     permission: 'suppliers:read' },
+      { to: ROUTES.CUSTOMERS,  label: 'Clientes',      icon: Users,     permission: 'customers:read' },
+      { to: ROUTES.REPORTS,    label: 'Reportes',      icon: BarChart2, permission: 'reports:view' },
+      { to: ROUTES.SETTINGS,   label: 'Configuración', icon: Settings,  permission: 'tenant:settings' },
     ],
   },
 ];

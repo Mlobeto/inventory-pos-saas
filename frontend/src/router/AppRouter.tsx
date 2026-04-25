@@ -18,6 +18,7 @@ const GoodsReceiptDetailPage = lazy(() => import('../modules/goods-receipts/page
 const CashShiftPage = lazy(() => import('../modules/cash-shifts/pages/CashShiftPage'));
 const SalesListPage = lazy(() => import('../modules/sales/pages/SalesListPage'));
 const SaleNewPage = lazy(() => import('../modules/sales/pages/SaleNewPage'));
+const CustomersPage = lazy(() => import('../modules/customers/pages/CustomersPage'));
 
 function PageLoader() {
   return (
@@ -55,6 +56,7 @@ export default function AppRouter() {
           <Route path={ROUTES.PRODUCTS} element={<ProductsPage />} />
           <Route path={ROUTES.INVENTORY} element={<StubPage title="Inventario" />} />
           <Route path={ROUTES.SUPPLIERS} element={<SuppliersPage />} />
+          <Route path={ROUTES.CUSTOMERS} element={<CustomersPage />} />
           <Route path={ROUTES.REPORTS} element={<StubPage title="Reportes" />} />
           <Route path={ROUTES.SETTINGS} element={<StubPage title="Configuración" />} />
         </Route>

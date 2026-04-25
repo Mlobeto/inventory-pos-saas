@@ -92,6 +92,13 @@ enum SaleReturnItemCondition {
   UNUSABLE // producto inutilizable
 }
 
+enum CustomerType {
+  CONSUMIDOR_FINAL // sin datos fiscales, paga en mostrador
+  MAYORISTA        // precio mayorista
+  VENDEDOR         // precio vendedor, paga en cuenta corriente
+  FACTURABLE       // necesita factura (CUIT obligatorio)
+}
+
 // =============================================================================
 // TENANT — entidad raíz del modelo multi-tenant
 // =============================================================================
@@ -123,6 +130,7 @@ model Tenant {
   supplierPayments SupplierPayment[]
   saleReturns      SaleReturn[]
   sequences        TenantSequence[]
+  customers        Customer[]
 }
 
 // =============================================================================
@@ -521,6 +529,7 @@ model Sale {
   tenantId       String
   cashShiftId    String
   sellerId       String
+  customerId     String?    // cliente opcional; requerido si paga cuenta corriente
   saleNumber     String     // número correlativo por tenant
   status         SaleStatus @default(COMPLETED)
   subtotal       Decimal    @db.Decimal(12, 2)
@@ -536,6 +545,7 @@ model Sale {
   tenant    Tenant    @relation(fields: [tenantId], references: [id])
   cashShift CashShift @relation(fields: [cashShiftId], references: [id])
   seller    User      @relation(fields: [sellerId], references: [id])
+  customer  Customer? @relation(fields: [customerId], references: [id])
 
   details  SaleDetail[]
   payments SalePayment[]
@@ -547,6 +557,7 @@ model Sale {
   @@index([tenantId, status])
   @@index([tenantId, createdAt])
   @@index([tenantId, sellerId])
+  @@index([tenantId, customerId])
 }
 
 model SaleDetail {
@@ -713,4 +724,34 @@ model SaleReturnDetail {
 
   @@index([saleReturnId])
   @@index([productId])
+}
+
+// =============================================================================
+// CUSTOMER — cliente del negocio
+// =============================================================================
+
+model Customer {
+  id            String       @id @default(cuid())
+  tenantId      String
+  type          CustomerType
+  name          String
+  taxId         String?      // CUIT / DNI (obligatorio para FACTURABLE)
+  email         String?
+  phone         String?
+  address       String?
+  notes         String?
+  creditLimit   Decimal?     @db.Decimal(12, 2) // límite de crédito para VENDEDOR
+  userId        String?      // link a usuario con acceso al portal (futuro)
+  isActive      Boolean      @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  sales  Sale[]
+
+  @@index([tenantId])
+  @@index([tenantId, type])
+  @@index([tenantId, name])
 }

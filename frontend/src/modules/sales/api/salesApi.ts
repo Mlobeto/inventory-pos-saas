@@ -23,6 +23,7 @@ export interface CreateSaleDto {
   payments: SalePaymentInput[];
   notes?: string;
   discountAmount?: number;
+  customerId?: string;
 }
 
 export interface SaleDetailItem {
@@ -56,6 +57,7 @@ export interface Sale {
   cancelledAt?: string;
   cancelReason?: string;
   seller: { firstName: string; lastName: string };
+  customer?: { id: string; name: string; type: string } | null;
   payments: SalePayment[];
   details?: SaleDetailItem[];
   _count?: { details: number };

@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import {
   Clock, DollarSign, TrendingUp, TrendingDown, CreditCard,
   ChevronRight, Printer, X, AlertTriangle, ShoppingCart,
 } from 'lucide-react';
 import {
   openShift, closeShift, getCurrentShift, getCashShifts,
-  type CashShift, type ShiftDetail,
+  type CashShift,
 } from '../api/cashShiftsApi';
 import { getShiftDetail } from '../api/cashShiftsApi';
 import { getPaymentMethods, type PaymentMethod } from '@/modules/payment-methods/api/paymentMethodsApi';
@@ -162,7 +162,7 @@ function ActiveShiftPanel({
                 const found = summary!.paymentBreakdown.find(
                   (pb) => (pb as any).paymentMethodCode === pm.code,
                 );
-                if (!found && parseFloat(found?._sum?.amount ?? '0') === 0) return null;
+                if (!found || parseFloat(found._sum.amount) === 0) return null;
                 return (
                   <PaymentCard
                     key={pm.id}
@@ -192,14 +192,12 @@ function ActiveShiftPanel({
 function CloseShiftModal({
   isOpen,
   shift,
-  paymentMethods,
   onClose,
   onConfirm,
   isLoading,
 }: {
   isOpen: boolean;
   shift: CashShift | null;
-  paymentMethods: PaymentMethod[];
   onClose: () => void;
   onConfirm: (declared: number, notes: string) => void;
   isLoading: boolean;
@@ -607,7 +605,6 @@ export default function CashShiftPage() {
       <CloseShiftModal
         isOpen={showCloseModal}
         shift={currentShift ?? null}
-        paymentMethods={paymentMethods}
         onClose={() => setShowCloseModal(false)}
         onConfirm={(declared, notes) => closeMut.mutate({ declared, notes })}
         isLoading={closeMut.isPending}

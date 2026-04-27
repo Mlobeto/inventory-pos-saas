@@ -5,7 +5,6 @@ import { ArrowLeft, Truck } from 'lucide-react';
 import { getPurchase } from '@/modules/purchases/api/purchasesApi';
 import { createGoodsReceipt, type GoodsReceiptItem } from '../api/goodsReceiptsApi';
 import { Button } from '@/shared/components/ui/Button';
-import { Input } from '@/shared/components/ui/Input';
 import { Spinner } from '@/shared/components/ui/Spinner';
 import { ROUTES } from '@/router/routes';
 

@@ -125,7 +125,7 @@ afipSettingsRouter.put(
     await prisma.tenant.update({
       where: { id: req.tenantId },
       data: {
-        settings: { ...currentSettings, afip: updatedAfip },
+        settings: { ...currentSettings, afip: updatedAfip } as import('@prisma/client').Prisma.InputJsonValue,
       },
     });
 

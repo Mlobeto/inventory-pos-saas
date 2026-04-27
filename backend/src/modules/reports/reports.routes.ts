@@ -74,7 +74,7 @@ reportsRouter.get('/stock', asyncHandler(async (req, res) => {
       internalCode: true,
       currentStock: true,
       minStock: true,
-      productType: true,
+      type: true,
     },
     orderBy: { currentStock: 'asc' },
   });

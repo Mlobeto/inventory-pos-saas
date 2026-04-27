@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { AnyZodObject, ZodError } from 'zod';
+import { AnyZodObject, ZodEffects, ZodTypeAny, ZodError } from 'zod';
 import { AppError } from '../errors/AppError';
 
 type ValidationTarget = 'body' | 'query' | 'params';
@@ -9,7 +9,7 @@ type ValidationTarget = 'body' | 'query' | 'params';
  * Valida el body, query o params de la request contra un schema dado.
  * Si la validación pasa, reemplaza el campo con los datos parseados (coerced).
  */
-export function validate(schema: AnyZodObject, target: ValidationTarget = 'body') {
+export function validate(schema: AnyZodObject | ZodEffects<ZodTypeAny>, target: ValidationTarget = 'body') {
   return (req: Request, _res: Response, next: NextFunction): void => {
     try {
       const parsed = schema.parse(req[target]);

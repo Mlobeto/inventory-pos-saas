@@ -75,14 +75,20 @@ cashShiftRouter.get('/current', requirePermission('cash-shifts:read'), asyncHand
     }),
   ]);
 
-  const totalSales = salesTotal._sum.amount ?? new Decimal(0);
   const totalExpenses = expensesTotal._sum.amount ?? new Decimal(0);
-  const calculatedFinal = new Decimal(shift.initialAmount).add(totalSales).sub(totalExpenses);
 
   const breakdownWithNames = paymentBreakdown.map((pb) => {
     const method = allMethods.find((m) => m.id === pb.paymentMethodId);
     return { ...pb, paymentMethodCode: method?.code ?? '', paymentMethodName: method?.name ?? '' };
   });
+
+  // Crédito por devolución: es virtual (no entra ni sale efectivo real), se excluye del total
+  const exchangeCreditEntry = breakdownWithNames.find((b) => b.paymentMethodCode === 'EXCHANGE_CREDIT');
+  const exchangeCreditTotal = exchangeCreditEntry?._sum.amount
+    ? new Decimal(exchangeCreditEntry._sum.amount)
+    : new Decimal(0);
+  const totalSales = (salesTotal._sum.amount ?? new Decimal(0)).sub(exchangeCreditTotal);
+  const calculatedFinal = new Decimal(shift.initialAmount).add(totalSales).sub(totalExpenses);
 
   // Efectivo calculado en caja = apertura + pagos en efectivo (CASH) - gastos
   const cashMethodEntry = breakdownWithNames.find((b) => b.paymentMethodCode === 'CASH');
@@ -96,6 +102,7 @@ cashShiftRouter.get('/current', requirePermission('cash-shifts:read'), asyncHand
       totalExpenses,
       calculatedFinal,
       calculatedCash,
+      exchangeCreditTotal,
       paymentBreakdown: breakdownWithNames,
     },
   }));

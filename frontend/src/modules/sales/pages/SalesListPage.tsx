@@ -1,8 +1,16 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
-import { Plus, Eye } from 'lucide-react';
-import { getSales, getSaleDetail, cancelSale, type Sale, type SaleStatus } from '../api/salesApi';
+import { Link, useNavigate } from 'react-router-dom';
+import { Plus, Eye, FileText, Receipt, CheckCircle, AlertCircle } from 'lucide-react';
+import {
+  getSales,
+  getSaleDetail,
+  cancelSale,
+  createInvoice,
+  type Sale,
+  type SaleStatus,
+  type AfipInvoiceFull,
+} from '../api/salesApi';
 import { Button } from '@/shared/components/ui/Button';
 import { Table } from '@/shared/components/ui/Table';
 import { Badge } from '@/shared/components/ui/Badge';
@@ -29,6 +37,157 @@ const STATUS_VARIANT: Record<SaleStatus, 'green' | 'red' | 'yellow' | 'gray'> = 
 
 function fmt(amount: string | number): string {
   return `$${parseFloat(String(amount)).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
+}
+
+// ─── Modal de facturación AFIP ────────────────────────────────────────────────
+function InvoiceModal({
+  sale,
+  isOpen,
+  onClose,
+  onSuccess,
+}: {
+  sale: Sale | null;
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess: (invoice: AfipInvoiceFull) => void;
+}) {
+  const [result, setResult] = useState<AfipInvoiceFull | null>(null);
+  const [error, setError] = useState('');
+  const navigate = useNavigate();
+
+  const mutation = useMutation({
+    mutationFn: () => createInvoice(sale!.id),
+    onSuccess: (data) => {
+      setResult(data);
+      onSuccess(data);
+    },
+    onError: (err: unknown) => {
+      const msg =
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+        (err as Error).message ??
+        'Error al facturar';
+      setError(msg);
+    },
+  });
+
+  function handleClose() {
+    setResult(null);
+    setError('');
+    onClose();
+  }
+
+  if (!sale) return null;
+
+  const docLabel =
+    sale.customer?.type === 'FACTURABLE'
+      ? `CUIT ${sale.customer?.name}`
+      : (sale.customer?.name ?? 'Consumidor Final');
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={handleClose}
+      title={result ? 'Comprobante emitido' : `Emitir Factura C — Venta #${sale.saleNumber}`}
+      size="sm"
+    >
+      {result ? (
+        // ── Éxito ─────────────────────────────────────────────────────────────
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 p-4 bg-green-50 rounded-lg border border-green-200">
+            <CheckCircle className="h-8 w-8 text-green-500 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-green-800">Comprobante autorizado</p>
+              <p className="text-xs text-green-700 mt-0.5">
+                Factura C Nro. {String(result.pointOfSale).padStart(4, '0')}-
+                {String(result.invoiceNumber).padStart(8, '0')}
+              </p>
+            </div>
+          </div>
+
+          <div className="text-sm space-y-2">
+            <div className="flex justify-between">
+              <span className="text-gray-500">CAE:</span>
+              <span className="font-mono font-semibold">{result.cae}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Vencimiento CAE:</span>
+              <span>
+                {result.caeExpiry
+                  ? format(
+                      new Date(
+                        `${result.caeExpiry.slice(0, 4)}-${result.caeExpiry.slice(4, 6)}-${result.caeExpiry.slice(6, 8)}`,
+                      ),
+                      'dd/MM/yyyy',
+                    )
+                  : '—'}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex gap-2 pt-1">
+            <Button variant="secondary" onClick={handleClose} className="flex-1">
+              Cerrar
+            </Button>
+            <Button
+              className="flex-1"
+              leftIcon={<FileText className="h-4 w-4" />}
+              onClick={() => {
+                handleClose();
+                navigate(ROUTES.SALE_INVOICE.replace(':id', sale.id));
+              }}
+            >
+              Ver comprobante
+            </Button>
+          </div>
+        </div>
+      ) : (
+        // ── Confirmación ──────────────────────────────────────────────────────
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Se va a emitir una <strong>Factura C</strong> a AFIP por esta venta.
+          </p>
+
+          <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-1">
+            <div className="flex justify-between">
+              <span className="text-gray-500">Receptor:</span>
+              <span className="font-medium">{docLabel}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Importe:</span>
+              <span className="font-semibold">{fmt(sale.totalAmount)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Concepto:</span>
+              <span>Productos</span>
+            </div>
+          </div>
+
+          {error && (
+            <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <AlertCircle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-red-700">{error}</p>
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-1">
+            <Button variant="secondary" onClick={handleClose} disabled={mutation.isPending}>
+              Cancelar
+            </Button>
+            <Button
+              isLoading={mutation.isPending}
+              leftIcon={<Receipt className="h-4 w-4" />}
+              onClick={() => {
+                setError('');
+                mutation.mutate();
+              }}
+            >
+              {mutation.isPending ? 'Enviando a AFIP...' : 'Emitir comprobante'}
+            </Button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
 }
 
 // ─── Modal detalle de venta ───────────────────────────────────────────────────
@@ -248,11 +407,21 @@ export default function SalesListPage() {
   const [page, setPage] = useState(1);
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Sale | null>(null);
+  const [invoiceTarget, setInvoiceTarget] = useState<Sale | null>(null);
   const queryClient = useQueryClient();
 
+  // ── Filters ────────────────────────────────────────────────────────────────
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [sellerSearch, setSellerSearch] = useState('');
+  const [pendingInvoice, setPendingInvoice] = useState(false);
+
+  const filters = { dateFrom, dateTo, customerName, sellerSearch, pendingInvoice: pendingInvoice || undefined };
+
   const { data, isLoading } = useQuery({
-    queryKey: ['sales', page],
-    queryFn: () => getSales({ page, limit: 20 }),
+    queryKey: ['sales', page, filters],
+    queryFn: () => getSales({ page, limit: 20, ...filters }),
   });
 
   const cancelMut = useMutation({
@@ -274,6 +443,73 @@ export default function SalesListPage() {
         <Link to={ROUTES.SALES_NEW}>
           <Button leftIcon={<Plus className="h-4 w-4" />}>Nueva venta</Button>
         </Link>
+      </div>
+
+      {/* ── Filtros ──────────────────────────────────────────────────────── */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4 flex flex-wrap gap-3 items-end">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-gray-600">Desde</label>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
+            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-gray-600">Hasta</label>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
+            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-gray-600">Cliente</label>
+          <input
+            type="text"
+            placeholder="Nombre del cliente"
+            value={customerName}
+            onChange={(e) => { setCustomerName(e.target.value); setPage(1); }}
+            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm w-44 focus:outline-none focus:ring-2 focus:ring-brand-500"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-gray-600">Vendedor</label>
+          <input
+            type="text"
+            placeholder="Nombre del vendedor"
+            value={sellerSearch}
+            onChange={(e) => { setSellerSearch(e.target.value); setPage(1); }}
+            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm w-44 focus:outline-none focus:ring-2 focus:ring-brand-500"
+          />
+        </div>
+        <label className="flex items-center gap-2 text-sm cursor-pointer pb-1">
+          <input
+            type="checkbox"
+            checked={pendingInvoice}
+            onChange={(e) => { setPendingInvoice(e.target.checked); setPage(1); }}
+            className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+          />
+          <span className="text-gray-700">Pendiente de facturar</span>
+        </label>
+        {(dateFrom || dateTo || customerName || sellerSearch || pendingInvoice) && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setDateFrom('');
+              setDateTo('');
+              setCustomerName('');
+              setSellerSearch('');
+              setPendingInvoice(false);
+              setPage(1);
+            }}
+          >
+            Limpiar filtros
+          </Button>
+        )}
       </div>
 
       <Table
@@ -335,21 +571,52 @@ export default function SalesListPage() {
             key: 'status',
             header: 'Estado',
             render: (r) => (
-              <Badge variant={STATUS_VARIANT[r.status]}>{STATUS_LABELS[r.status]}</Badge>
+              <div className="flex flex-col gap-1">
+                <Badge variant={STATUS_VARIANT[r.status]}>{STATUS_LABELS[r.status]}</Badge>
+                {r.afipInvoice?.status === 'AUTHORIZED' && (
+                  <span className="text-xs text-brand-600 font-mono">
+                    FC {String(r.afipInvoice.pointOfSale).padStart(4, '0')}-
+                    {String(r.afipInvoice.invoiceNumber).padStart(8, '0')}
+                  </span>
+                )}
+              </div>
             ),
           },
           {
             key: 'actions',
             header: '',
             render: (r) => (
-              <Button
-                size="sm"
-                variant="ghost"
-                leftIcon={<Eye className="h-3.5 w-3.5" />}
-                onClick={() => setSelectedSaleId(r.id)}
-              >
-                Ver
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  leftIcon={<Eye className="h-3.5 w-3.5" />}
+                  onClick={() => setSelectedSaleId(r.id)}
+                >
+                  Ver
+                </Button>
+                {r.status === 'COMPLETED' && !r.afipInvoice && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    leftIcon={<Receipt className="h-3.5 w-3.5" />}
+                    onClick={() => setInvoiceTarget(r)}
+                  >
+                    Facturar
+                  </Button>
+                )}
+                {r.afipInvoice?.status === 'AUTHORIZED' && (
+                  <Link to={ROUTES.SALE_INVOICE.replace(':id', r.id)}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      leftIcon={<FileText className="h-3.5 w-3.5" />}
+                    >
+                      Ver FC
+                    </Button>
+                  </Link>
+                )}
+              </div>
             ),
           },
         ]}
@@ -373,6 +640,13 @@ export default function SalesListPage() {
           cancelMut.mutate({ id: cancelTarget!.id, reason })
         }
         isLoading={cancelMut.isPending}
+      />
+
+      <InvoiceModal
+        sale={invoiceTarget}
+        isOpen={!!invoiceTarget}
+        onClose={() => setInvoiceTarget(null)}
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ['sales'] })}
       />
     </div>
   );

@@ -99,6 +99,18 @@ enum CustomerType {
   FACTURABLE       // necesita factura (CUIT obligatorio)
 }
 
+enum CustomerReceivableStatus {
+  PENDING  // deuda pendiente
+  PARTIAL  // pago parcial
+  PAID     // saldada
+}
+
+enum AfipInvoiceStatus {
+  AUTHORIZED // autorizado por AFIP — tiene CAE
+  REJECTED   // rechazado por AFIP
+  ERROR      // error de comunicación
+}
+
 // =============================================================================
 // TENANT — entidad raíz del modelo multi-tenant
 // =============================================================================
@@ -131,6 +143,9 @@ model Tenant {
   saleReturns      SaleReturn[]
   sequences        TenantSequence[]
   customers        Customer[]
+  customerReceivables CustomerReceivable[]
+  customerPayments    CustomerPayment[]
+  afipInvoices        AfipInvoice[]
 }
 
 // =============================================================================
@@ -176,6 +191,7 @@ model User {
   cashExpenses     CashExpense[]
   supplierPayments SupplierPayment[]
   processedReturns SaleReturn[]
+  customerPayments CustomerPayment[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -550,6 +566,8 @@ model Sale {
   details  SaleDetail[]
   payments SalePayment[]
   returns  SaleReturn[]
+  receivable  CustomerReceivable?
+  afipInvoice AfipInvoice?
 
   @@unique([tenantId, saleNumber])
   @@index([tenantId])
@@ -727,6 +745,46 @@ model SaleReturnDetail {
 }
 
 // =============================================================================
+// AFIP INVOICE — comprobante electrónico emitido a AFIP
+// =============================================================================
+
+model AfipInvoice {
+  id            String            @id @default(cuid())
+  tenantId      String
+  saleId        String            @unique // 1:1 con la venta
+
+  // Datos del comprobante
+  invoiceType   Int               // 11 = Factura C (monotributista)
+  pointOfSale   Int               // punto de venta
+  invoiceNumber Int               // número correlativo
+  concept       Int               @default(1) // 1=Productos 2=Servicios 3=Ambos
+  invoiceDate   String            // YYYYMMDD (snapshot de la fecha de la venta)
+
+  // Datos del receptor
+  docType       Int               // 80=CUIT 96=DNI 99=ConsumidorFinal
+  docNumber     String            // número de documento ("0" para CF)
+
+  // Importes
+  totalAmount   Decimal           @db.Decimal(12, 2)
+
+  // Respuesta de AFIP
+  cae           String?           // código de autorización electrónica
+  caeExpiry     String?           // YYYYMMDD — vencimiento del CAE
+  status        AfipInvoiceStatus
+  observations  Json?             // observaciones / alertas de AFIP
+  errorMessage  String?           // mensaje de error si status=ERROR
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  sale   Sale   @relation(fields: [saleId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+}
+
+// =============================================================================
 // CUSTOMER — cliente del negocio
 // =============================================================================
 
@@ -750,8 +808,66 @@ model Customer {
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
   sales  Sale[]
+  receivables CustomerReceivable[]
+  customerPayments CustomerPayment[]
 
   @@index([tenantId])
   @@index([tenantId, type])
   @@index([tenantId, name])
+}
+
+// =============================================================================
+// CUSTOMER RECEIVABLE — deuda de cliente por venta en cuenta corriente
+// =============================================================================
+
+model CustomerReceivable {
+  id              String                   @id @default(cuid())
+  tenantId        String
+  customerId      String
+  saleId          String                   @unique  // 1:1 con la venta
+  originalAmount  Decimal                  @db.Decimal(12, 2)
+  paidAmount      Decimal                  @db.Decimal(12, 2) @default(0)
+  remainingAmount Decimal                  @db.Decimal(12, 2)
+  status          CustomerReceivableStatus @default(PENDING)
+  notes           String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id])
+  customer Customer          @relation(fields: [customerId], references: [id])
+  sale     Sale              @relation(fields: [saleId], references: [id])
+  payments CustomerPayment[]
+
+  @@index([tenantId])
+  @@index([tenantId, customerId])
+  @@index([tenantId, status])
+}
+
+// =============================================================================
+// CUSTOMER PAYMENT — cobro aplicado contra una deuda de cuenta corriente
+// =============================================================================
+
+model CustomerPayment {
+  id             String @id @default(cuid())
+  tenantId       String
+  customerId     String
+  receivableId   String
+  amount         Decimal @db.Decimal(12, 2)
+  paymentMethod  String  // descripción libre: "Efectivo", "Transfer", etc.
+  reference      String?
+  notes          String?
+  createdById    String
+
+  paidAt    DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id])
+  customer    Customer           @relation(fields: [customerId], references: [id])
+  receivable  CustomerReceivable @relation(fields: [receivableId], references: [id])
+  createdBy   User               @relation(fields: [createdById], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, customerId])
+  @@index([receivableId])
 }

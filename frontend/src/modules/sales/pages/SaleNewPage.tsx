@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   Search, Plus, Minus, Trash2, CheckCircle, AlertCircle,
-  ShoppingCart, Clock, ChevronDown, Printer, UserRound, X, UserPlus,
+  ShoppingCart, Clock, ChevronDown, Printer, UserRound, X, UserPlus, ArrowLeftRight,
 } from 'lucide-react';
 import { createSale, type Sale } from '../api/salesApi';
 import { searchProducts, type Product } from '@/modules/products/api/productsApi';
@@ -133,6 +133,7 @@ export default function SaleNewPage() {
   const [notes, setNotes] = useState('');
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
   const [formError, setFormError] = useState('');
+  const [exchangeCredit, setExchangeCredit] = useState('');
 
   // Cliente
   const [customerId, setCustomerId] = useState('');
@@ -144,7 +145,14 @@ export default function SaleNewPage() {
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [quickCreateName, setQuickCreateName] = useState('');
   const [quickCreateType, setQuickCreateType] = useState<CustomerType>('CONSUMIDOR_FINAL');
+  const [quickCreateTaxId, setQuickCreateTaxId] = useState('');
+  const [quickCreatePhone, setQuickCreatePhone] = useState('');
+  const [quickCreateEmail, setQuickCreateEmail] = useState('');
+  const [quickCreateAddress, setQuickCreateAddress] = useState('');
+  const [quickCreateNotes, setQuickCreateNotes] = useState('');
+  const [quickCreateCreditLimit, setQuickCreateCreditLimit] = useState('');
   const [quickCreateLoading, setQuickCreateLoading] = useState(false);
+  const [quickCreateError, setQuickCreateError] = useState('');
 
   // Búsqueda de clientes (debounce)
   useEffect(() => {
@@ -198,8 +206,9 @@ export default function SaleNewPage() {
     staleTime: 10_000,
   });
 
-  // Métodos de pago disponibles para cobrar (no son listas de precio, salvo CASH)
-  const paymentMethods = allMethods.filter((m) => !m.isPriceTier || m.code === 'CASH');
+  // Métodos de pago disponibles para cobrar (no son listas de precio, salvo CASH; excluir EXCHANGE_CREDIT del selector normal)
+  const paymentMethods = allMethods.filter((m) => (!m.isPriceTier || m.code === 'CASH') && m.code !== 'EXCHANGE_CREDIT');
+  const exchangeCreditMethod = allMethods.find((m) => m.code === 'EXCHANGE_CREDIT');
 
   // Auto-seleccionar PUBLIC como lista de precios por defecto
   useEffect(() => {
@@ -275,6 +284,13 @@ export default function SaleNewPage() {
   function openQuickCreate() {
     setQuickCreateName(customerSearch.trim());
     setQuickCreateType('CONSUMIDOR_FINAL');
+    setQuickCreateTaxId('');
+    setQuickCreatePhone('');
+    setQuickCreateEmail('');
+    setQuickCreateAddress('');
+    setQuickCreateNotes('');
+    setQuickCreateCreditLimit('');
+    setQuickCreateError('');
     setCustomerDropdownOpen(false);
     setQuickCreateOpen(true);
   }
@@ -282,14 +298,25 @@ export default function SaleNewPage() {
   async function handleQuickCreate() {
     if (!quickCreateName.trim()) return;
     setQuickCreateLoading(true);
+    setQuickCreateError('');
     try {
-      const dto: CreateCustomerDto = { name: quickCreateName.trim(), type: quickCreateType };
+      const dto: CreateCustomerDto = {
+        name: quickCreateName.trim(),
+        type: quickCreateType,
+        taxId: quickCreateTaxId.trim() || undefined,
+        phone: quickCreatePhone.trim() || undefined,
+        email: quickCreateEmail.trim() || undefined,
+        address: quickCreateAddress.trim() || undefined,
+        notes: quickCreateNotes.trim() || undefined,
+        creditLimit: quickCreateCreditLimit ? Number(quickCreateCreditLimit) : undefined,
+      };
       const newCustomer = await createCustomer(dto);
       queryClient.invalidateQueries({ queryKey: ['customers'] });
       handleCustomerSelect(newCustomer);
       setQuickCreateOpen(false);
-    } catch {
-      // silently ignore — user can try again
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Error al crear el cliente';
+      setQuickCreateError(msg);
     } finally {
       setQuickCreateLoading(false);
     }
@@ -306,7 +333,8 @@ export default function SaleNewPage() {
 
   const discount = parseFloat(globalDiscount) || 0;
   const totalAmount = Math.max(0, cartSubtotal - discount);
-  const totalPaid = payments.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0);
+  const exchangeCreditAmount = parseFloat(exchangeCredit) || 0;
+  const totalPaid = payments.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0) + exchangeCreditAmount;
   const remaining = totalAmount - totalPaid;
   const hasChange = totalPaid > totalAmount + 0.005;
 
@@ -377,7 +405,7 @@ export default function SaleNewPage() {
     const othersPaid = payments
       .filter((p) => p.rowId !== rowId)
       .reduce((a, p) => a + (parseFloat(p.amount) || 0), 0);
-    const fill = Math.max(0, totalAmount - othersPaid);
+    const fill = Math.max(0, totalAmount - exchangeCreditAmount - othersPaid);
     if (fill > 0) {
       setPayments((prev) =>
         prev.map((p) => (p.rowId === rowId ? { ...p, amount: fill.toFixed(2) } : p)),
@@ -412,11 +440,32 @@ export default function SaleNewPage() {
       return;
     }
 
-    const validPayments = payments.filter(
+    // CREDIT_ACCOUNT sin monto se completa automáticamente con el total pendiente
+    const paymentsToValidate = payments.map((p) => {
+      const pm = paymentMethods.find((m) => m.id === p.methodId);
+      if (pm?.code === 'CREDIT_ACCOUNT' && (!p.amount || parseFloat(p.amount) === 0)) {
+        return { ...p, amount: String(remaining > 0 ? remaining : totalAmount) };
+      }
+      return p;
+    });
+
+    // Inyectar crédito por devolución como pago adicional si aplica
+    if (exchangeCreditAmount > 0 && exchangeCreditMethod) {
+      paymentsToValidate.push({
+        rowId: 'exchange-credit',
+        methodId: exchangeCreditMethod.id,
+        amount: String(exchangeCreditAmount),
+        ref: '',
+      });
+    }
+
+    const validPayments = paymentsToValidate.filter(
       (p) => p.methodId && parseFloat(p.amount) > 0,
     );
     if (validPayments.length === 0) { setFormError('Registrá al menos un pago'); return; }
-    if (remaining > 0.01) { setFormError(`Falta cobrar ${fmt(remaining)}`); return; }
+
+    const newTotalPaid = validPayments.reduce((acc, p) => acc + parseFloat(p.amount), 0);
+    if (newTotalPaid < totalAmount - 0.01) { setFormError(`Falta cobrar ${fmt(totalAmount - newTotalPaid)}`); return; }
 
     // Advertencia: CREDIT_ACCOUNT requiere cliente
     const hasCreditAccount = validPayments.some((p) => {
@@ -456,6 +505,7 @@ export default function SaleNewPage() {
     setFormError('');
     setSearchQuery('');
     methodsInitialized.current = false;
+    setExchangeCredit('');
     setCustomerId('');
     setSelectedCustomer(null);
     setCustomerSearch('');
@@ -566,21 +616,11 @@ export default function SaleNewPage() {
 
             {/* Formulario rápido de creación */}
             {quickCreateOpen && (
-              <div className="absolute top-full left-0 mt-1 w-72 bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-3 space-y-3">
+              <div className="absolute top-full left-0 mt-1 w-80 bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-4 space-y-3">
                 <p className="text-sm font-semibold text-gray-800">Nuevo cliente</p>
+
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Nombre *</label>
-                  <input
-                    autoFocus
-                    type="text"
-                    value={quickCreateName}
-                    onChange={(e) => setQuickCreateName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleQuickCreate(); if (e.key === 'Escape') setQuickCreateOpen(false); }}
-                    className="w-full border border-gray-300 rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Tipo</label>
+                  <label className="block text-xs text-gray-500 mb-1">Tipo *</label>
                   <select
                     value={quickCreateType}
                     onChange={(e) => setQuickCreateType(e.target.value as CustomerType)}
@@ -591,6 +631,88 @@ export default function SaleNewPage() {
                     ))}
                   </select>
                 </div>
+
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Nombre *</label>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={quickCreateName}
+                    onChange={(e) => setQuickCreateName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Escape') setQuickCreateOpen(false); }}
+                    className="w-full border border-gray-300 rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">CUIT / DNI</label>
+                  <input
+                    type="text"
+                    value={quickCreateTaxId}
+                    onChange={(e) => setQuickCreateTaxId(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Teléfono</label>
+                    <input
+                      type="text"
+                      value={quickCreatePhone}
+                      onChange={(e) => setQuickCreatePhone(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Email</label>
+                    <input
+                      type="email"
+                      value={quickCreateEmail}
+                      onChange={(e) => setQuickCreateEmail(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Dirección</label>
+                  <input
+                    type="text"
+                    value={quickCreateAddress}
+                    onChange={(e) => setQuickCreateAddress(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+
+                {(quickCreateType === 'VENDEDOR' || quickCreateType === 'MAYORISTA' || quickCreateType === 'FACTURABLE') && (
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Límite de crédito ($)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={quickCreateCreditLimit}
+                      onChange={(e) => setQuickCreateCreditLimit(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Notas</label>
+                  <textarea
+                    rows={2}
+                    value={quickCreateNotes}
+                    onChange={(e) => setQuickCreateNotes(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+
+                {quickCreateError && (
+                  <p className="text-red-600 text-xs">{quickCreateError}</p>
+                )}
+
                 <div className="flex gap-2 pt-1">
                   <button
                     type="button"
@@ -605,7 +727,7 @@ export default function SaleNewPage() {
                     onClick={handleQuickCreate}
                     className="flex-1 py-1.5 text-sm bg-brand-600 text-white rounded-md hover:bg-brand-700 disabled:opacity-50 font-medium"
                   >
-                    {quickCreateLoading ? 'Creando...' : 'Crear'}
+                    {quickCreateLoading ? 'Creando...' : 'Crear cliente'}
                   </button>
                 </div>
               </div>
@@ -877,7 +999,14 @@ export default function SaleNewPage() {
                   <div key={row.rowId} className="flex gap-2 items-center">
                     <select
                       value={row.methodId}
-                      onChange={(e) => updatePayment(row.rowId, 'methodId', e.target.value)}
+                      onChange={(e) => {
+                        updatePayment(row.rowId, 'methodId', e.target.value);
+                        // Si es Cuenta Corriente, auto-llenar con el saldo pendiente
+                        const selectedMethod = paymentMethods.find((m) => m.id === e.target.value);
+                        if (selectedMethod?.code === 'CREDIT_ACCOUNT' && !row.amount && remaining > 0.005) {
+                          fillRemaining(row.rowId);
+                        }
+                      }}
                       className="flex-1 border border-gray-300 rounded-md text-sm px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-0"
                     >
                       <option value="">Método...</option>
@@ -925,6 +1054,27 @@ export default function SaleNewPage() {
                 >
                   <Plus className="h-3 w-3" /> Agregar método de pago
                 </button>
+
+                {/* Crédito por devolución (cambio de producto) */}
+                {exchangeCreditMethod && (
+                  <div className="flex gap-2 items-center bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-1">
+                    <ArrowLeftRight className="h-3.5 w-3.5 text-amber-600 flex-shrink-0" />
+                    <span className="text-xs text-amber-700 font-medium flex-1 whitespace-nowrap">Crédito cambio</span>
+                    <div className="relative w-24">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-amber-500 text-sm pointer-events-none">$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max={totalAmount}
+                        step="0.01"
+                        value={exchangeCredit}
+                        onChange={(e) => setExchangeCredit(e.target.value)}
+                        placeholder="0"
+                        className="w-full pl-5 pr-2 py-1.5 border border-amber-300 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {/* Balance restante / cambio */}
                 {totalAmount > 0 && (

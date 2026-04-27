@@ -177,7 +177,8 @@ async function main() {
     { code: 'TRANSFER',       name: 'Transferencia',          isPriceTier: false, sortOrder: 6 },
     { code: 'BNA',            name: 'BNA',                    isPriceTier: false, sortOrder: 7 },
     { code: 'CUENTA_DNI',     name: 'Cuenta DNI',             isPriceTier: false, sortOrder: 8 },
-    { code: 'CREDIT_ACCOUNT', name: 'Cuenta Corriente',       isPriceTier: false, sortOrder: 9 },
+    { code: 'CREDIT_ACCOUNT',  name: 'Cuenta Corriente',       isPriceTier: false, sortOrder: 9 },
+    { code: 'EXCHANGE_CREDIT', name: 'Crédito por devolución', isPriceTier: false, sortOrder: 10 },
   ];
 
   for (const pm of paymentMethods) {

@@ -20,6 +20,9 @@ export interface Product {
     price: string;
     paymentMethod: { id: string; code: string; name: string };
   }>;
+  purchaseDetails?: Array<{
+    purchase: { supplier: { id: string; name: string } };
+  }>;
 }
 
 export interface ProductsPage {

@@ -97,6 +97,15 @@ productRouter.get(
       include: {
         productCodes: true,
         productPrices: { include: { paymentMethod: true } },
+        purchaseDetails: {
+          orderBy: { purchase: { createdAt: 'desc' } },
+          take: 1,
+          include: {
+            purchase: {
+              select: { supplier: { select: { id: true, name: true } } },
+            },
+          },
+        },
       },
     });
     if (!product) throw AppError.notFound('Producto');

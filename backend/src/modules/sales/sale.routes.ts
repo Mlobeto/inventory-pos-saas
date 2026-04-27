@@ -6,7 +6,7 @@ import { prisma } from '../../config/database';
 import { successResponse, paginatedResponse } from '../../core/utils/response';
 import { parsePagination, buildPaginationMeta } from '../../core/utils/pagination';
 import { AppError } from '../../core/errors/AppError';
-import { CashShiftStatus, SaleStatus, StockMovementType } from '@prisma/client';
+import { CashShiftStatus, SaleStatus, StockMovementType, Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { formatSaleNumber, SEQUENCE_ENTITIES } from '../../shared/constants';
 
@@ -16,7 +16,46 @@ saleRouter.use(authMiddleware, tenancyMiddleware);
 
 saleRouter.get('/', requirePermission('sales:read'), asyncHandler(async (req, res) => {
   const pagination = parsePagination(req);
-  const where = { tenantId: req.tenantId };
+  const { dateFrom, dateTo, customerName, sellerSearch, pendingInvoice, saleNumber } = req.query as {
+    dateFrom?: string;
+    dateTo?: string;
+    customerName?: string;
+    sellerSearch?: string;
+    pendingInvoice?: string;
+    saleNumber?: string;
+  };
+
+  const where: Prisma.SaleWhereInput = { tenantId: req.tenantId };
+
+  if (dateFrom || dateTo) {
+    where.createdAt = {
+      ...(dateFrom ? { gte: new Date(dateFrom) } : {}),
+      ...(dateTo ? { lte: new Date(dateTo + 'T23:59:59.999Z') } : {}),
+    };
+  }
+
+  if (customerName) {
+    where.customer = { name: { contains: customerName, mode: 'insensitive' } };
+  }
+
+  if (sellerSearch) {
+    where.seller = {
+      OR: [
+        { firstName: { contains: sellerSearch, mode: 'insensitive' } },
+        { lastName: { contains: sellerSearch, mode: 'insensitive' } },
+      ],
+    };
+  }
+
+  if (pendingInvoice === 'true') {
+    where.status = SaleStatus.COMPLETED;
+    where.afipInvoice = { is: null };
+  }
+
+  if (saleNumber) {
+    where.saleNumber = { contains: saleNumber, mode: 'insensitive' };
+  }
+
   const [sales, total] = await Promise.all([
     prisma.sale.findMany({
       where,
@@ -28,6 +67,9 @@ saleRouter.get('/', requirePermission('sales:read'), asyncHandler(async (req, re
         customer: { select: { id: true, name: true, type: true } },
         payments: { include: { paymentMethod: { select: { code: true, name: true } } } },
         _count: { select: { details: true } },
+        afipInvoice: {
+          select: { id: true, status: true, invoiceNumber: true, pointOfSale: true, cae: true, caeExpiry: true },
+        },
       },
     }),
     prisma.sale.count({ where }),
@@ -48,7 +90,16 @@ saleRouter.get('/:id', requirePermission('sales:read'), asyncHandler(async (req,
         include: { paymentMethod: { select: { id: true, code: true, name: true } } },
       },
       returns: {
-        select: { id: true, type: true, totalAmount: true, createdAt: true },
+        select: {
+          id: true,
+          type: true,
+          totalAmount: true,
+          createdAt: true,
+          details: { select: { saleDetailId: true, quantityReturned: true } },
+        },
+      },
+      afipInvoice: {
+        select: { id: true, status: true, invoiceNumber: true, pointOfSale: true, cae: true, caeExpiry: true },
       },
     },
   });
@@ -148,6 +199,26 @@ saleRouter.post('/', requirePermission('sales:create'), asyncHandler(async (req,
         reference: p.reference,
       })),
     });
+
+    // Si hay pago en cuenta corriente, crear CustomerReceivable
+    const paymentMethods = await tx.paymentMethod.findMany({
+      where: { id: { in: payments.map((p) => p.paymentMethodId) }, tenantId: req.tenantId },
+      select: { id: true, code: true },
+    });
+    const methodMap = new Map(paymentMethods.map((m) => [m.id, m.code]));
+    const creditPayment = payments.find((p) => methodMap.get(p.paymentMethodId) === 'CREDIT_ACCOUNT');
+    if (creditPayment) {
+      if (!customerId) throw AppError.validation('Cuenta corriente requiere que se seleccione un cliente');
+      await tx.customerReceivable.create({
+        data: {
+          tenantId: req.tenantId,
+          customerId,
+          saleId: newSale.id,
+          originalAmount: new Decimal(creditPayment.amount),
+          remainingAmount: new Decimal(creditPayment.amount),
+        },
+      });
+    }
 
     // Descontar stock y crear StockMovements
     for (const item of items) {

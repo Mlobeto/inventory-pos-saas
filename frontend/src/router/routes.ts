@@ -4,6 +4,7 @@ export const ROUTES = {
   CASH_SHIFTS: '/caja',
   SALES: '/ventas',
   SALES_NEW: '/ventas/nueva',
+  SALE_INVOICE: '/ventas/:id/comprobante',
   SALE_RETURNS: '/devoluciones',
   PURCHASES: '/compras',
   PURCHASES_NEW: '/compras/nueva',
@@ -16,6 +17,8 @@ export const ROUTES = {
   INVENTORY: '/inventario',
   SUPPLIERS: '/proveedores',
   CUSTOMERS: '/clientes',
+  CUSTOMER_STATEMENT: '/clientes/:id/cuenta',
   REPORTS: '/reportes',
   SETTINGS: '/configuracion',
+  AFIP_SETTINGS: '/configuracion/afip',
 } as const;

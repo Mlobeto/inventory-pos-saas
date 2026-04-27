@@ -19,6 +19,8 @@ import { supplierPaymentRouter } from '../modules/supplier-payments/supplier-pay
 import { saleReturnRouter } from '../modules/sale-returns/sale-return.routes';
 import { reportsRouter } from '../modules/reports/reports.routes';
 import { customerRouter } from '../modules/customers/customer.routes';
+import { customerReceivablesRouter } from '../modules/customers/customer-receivables.routes';
+import { invoiceRouter, afipSettingsRouter } from '../modules/afip/invoice.routes';
 
 const API_PREFIX = '/api';
 
@@ -37,6 +39,7 @@ export function registerRoutes(app: Application): void {
   // Maestros
   app.use(`${API_PREFIX}/suppliers`, supplierRouter);
   app.use(`${API_PREFIX}/customers`, customerRouter);
+  app.use(`${API_PREFIX}/customers`, customerReceivablesRouter);
   app.use(`${API_PREFIX}/products`, productRouter);
   app.use(`${API_PREFIX}/product-codes`, productCodeRouter);
   app.use(`${API_PREFIX}/product-prices`, productPriceRouter);
@@ -49,8 +52,12 @@ export function registerRoutes(app: Application): void {
   // Caja y ventas
   app.use(`${API_PREFIX}/cash-shifts`, cashShiftRouter);
   app.use(`${API_PREFIX}/sales`, saleRouter);
+  app.use(`${API_PREFIX}/sales`, invoiceRouter);
   app.use(`${API_PREFIX}/cash-expenses`, cashExpenseRouter);
   app.use(`${API_PREFIX}/sale-returns`, saleReturnRouter);
+
+  // AFIP
+  app.use(`${API_PREFIX}/afip`, afipSettingsRouter);
 
   // Proveedores — finanzas
   app.use(`${API_PREFIX}/accounts-payable`, accountsPayableRouter);

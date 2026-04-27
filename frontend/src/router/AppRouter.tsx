@@ -18,7 +18,12 @@ const GoodsReceiptDetailPage = lazy(() => import('../modules/goods-receipts/page
 const CashShiftPage = lazy(() => import('../modules/cash-shifts/pages/CashShiftPage'));
 const SalesListPage = lazy(() => import('../modules/sales/pages/SalesListPage'));
 const SaleNewPage = lazy(() => import('../modules/sales/pages/SaleNewPage'));
+const InvoicePrintPage = lazy(() => import('../modules/sales/pages/InvoicePrintPage'));
 const CustomersPage = lazy(() => import('../modules/customers/pages/CustomersPage'));
+const CustomerStatementPage = lazy(() => import('../modules/customers/pages/CustomerStatementPage'));
+const AfipSettingsPage = lazy(() => import('../modules/settings/pages/AfipSettingsPage'));
+const SettingsPage = lazy(() => import('../modules/settings/pages/SettingsPage'));
+const SaleReturnsPage = lazy(() => import('../modules/sale-returns/pages/SaleReturnsPage'));
 
 function PageLoader() {
   return (
@@ -45,7 +50,8 @@ export default function AppRouter() {
           <Route path={ROUTES.CASH_SHIFTS} element={<CashShiftPage />} />
           <Route path={ROUTES.SALES_NEW} element={<SaleNewPage />} />
           <Route path={ROUTES.SALES} element={<SalesListPage />} />
-          <Route path={ROUTES.SALE_RETURNS} element={<StubPage title="Devoluciones" />} />
+          <Route path={ROUTES.SALE_INVOICE} element={<InvoicePrintPage />} />
+          <Route path={ROUTES.SALE_RETURNS} element={<SaleReturnsPage />} />
           <Route path={ROUTES.PURCHASES} element={<PurchasesListPage />} />
           <Route path={ROUTES.PURCHASES_NEW} element={<PurchaseNewPage />} />
           <Route path={ROUTES.PURCHASES_DETAIL} element={<PurchaseDetailPage />} />
@@ -57,8 +63,10 @@ export default function AppRouter() {
           <Route path={ROUTES.INVENTORY} element={<StubPage title="Inventario" />} />
           <Route path={ROUTES.SUPPLIERS} element={<SuppliersPage />} />
           <Route path={ROUTES.CUSTOMERS} element={<CustomersPage />} />
+          <Route path={ROUTES.CUSTOMER_STATEMENT} element={<CustomerStatementPage />} />
           <Route path={ROUTES.REPORTS} element={<StubPage title="Reportes" />} />
-          <Route path={ROUTES.SETTINGS} element={<StubPage title="Configuración" />} />
+          <Route path={ROUTES.SETTINGS} element={<SettingsPage />} />
+          <Route path={ROUTES.AFIP_SETTINGS} element={<AfipSettingsPage />} />
         </Route>
 
         <Route path="*" element={<Navigate to={ROUTES.DASHBOARD} replace />} />

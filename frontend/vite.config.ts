@@ -39,6 +39,13 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // Evita que el SW devuelva index.html para requests de assets JS/CSS
+        navigateFallback: '/index.html',
+        navigateFallbackDenylist: [
+          /^\/assets\//,   // chunks JS/CSS del build
+          /^\/api\//,      // llamadas al backend
+          /\.[a-z0-9]+$/i, // cualquier archivo con extensión
+        ],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,

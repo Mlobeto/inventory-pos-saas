@@ -165,6 +165,7 @@ export default function SaleNewPage() {
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
   const methodsInitialized = useRef(false);
+  const skipPaymentReset = useRef(false);
   // Lector de código de barras: cuando Enter se dispara antes que el debounce
   const pendingAddRef = useRef(false);
   const addToCartRef = useRef<((p: Product) => void) | null>(null);
@@ -237,9 +238,14 @@ export default function SaleNewPage() {
     }
   }, [searchResults, searching]);
 
-  // Cuando cambia la lista de precios, ajustar el método de cobro por defecto
+  // Cuando cambia la lista de precios (por selección manual), ajustar el método de cobro por defecto
   useEffect(() => {
     if (!priceListId || paymentMethods.length === 0) return;
+    // Si el cambio fue disparado por el selector de método de pago, no resetear
+    if (skipPaymentReset.current) {
+      skipPaymentReset.current = false;
+      return;
+    }
     const selectedTier = priceTierMethods.find((m) => m.id === priceListId);
     if (!selectedTier) return;
 
@@ -1001,10 +1007,26 @@ export default function SaleNewPage() {
                       value={row.methodId}
                       onChange={(e) => {
                         updatePayment(row.rowId, 'methodId', e.target.value);
-                        // Si es Cuenta Corriente, auto-llenar con el saldo pendiente
                         const selectedMethod = paymentMethods.find((m) => m.id === e.target.value);
+                        // Si es Cuenta Corriente, auto-llenar con el saldo pendiente
                         if (selectedMethod?.code === 'CREDIT_ACCOUNT' && !row.amount && remaining > 0.005) {
                           fillRemaining(row.rowId);
+                        }
+                        // Sincronizar lista de precios según método de pago (solo primera fila)
+                        const isFirstRow = payments[0]?.rowId === row.rowId;
+                        if (isFirstRow && priceTierMethods.length > 0) {
+                          const tierCode =
+                            selectedMethod?.code === 'CASH' ? 'CASH'
+                            : selectedMethod?.code === 'CREDIT_ACCOUNT' ? 'VENDEDOR'
+                            : 'PUBLIC';
+                          const tier =
+                            priceTierMethods.find((m) => m.code === tierCode) ??
+                            priceTierMethods.find((m) => m.code === 'PUBLIC') ??
+                            priceTierMethods[0];
+                          if (tier && tier.id !== priceListId) {
+                            skipPaymentReset.current = true;
+                            setPriceListId(tier.id);
+                          }
                         }
                       }}
                       className="flex-1 border border-gray-300 rounded-md text-sm px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-0"

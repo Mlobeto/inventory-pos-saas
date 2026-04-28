@@ -6,7 +6,7 @@ import { prisma } from '../../config/database';
 import { successResponse, paginatedResponse } from '../../core/utils/response';
 import { parsePagination, buildPaginationMeta } from '../../core/utils/pagination';
 import { AppError } from '../../core/errors/AppError';
-import { PurchaseStatus } from '@prisma/client';
+import { GoodsReceiptStatus, PurchaseStatus, StockMovementType } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 
 export const purchaseRouter = Router();
@@ -67,32 +67,112 @@ purchaseRouter.post('/', requirePermission('purchases:write'), asyncHandler(asyn
   });
   if (!supplier) throw AppError.notFound('Proveedor');
 
-  // Calcular totales
   const subtotal = items.reduce((acc, i) => acc + i.quantityOrdered * i.unitCost, 0);
+  const userId = req.user!.sub;
 
-  const purchase = await prisma.purchase.create({
-    data: {
-      tenantId: req.tenantId,
-      supplierId,
-      invoiceNumber,
-      invoiceDate: invoiceDate ? new Date(invoiceDate) : undefined,
-      notes,
-      status: PurchaseStatus.DRAFT,
-      subtotal: new Decimal(subtotal),
-      totalAmount: new Decimal(subtotal),
-      details: {
-        create: items.map((i) => ({
-          productId: i.productId,
-          quantityOrdered: i.quantityOrdered,
-          unitCost: new Decimal(i.unitCost),
-          subtotal: new Decimal(i.quantityOrdered * i.unitCost),
-        })),
+  const purchase = await prisma.$transaction(async (tx) => {
+    // 1. Crear compra con detalles
+    const newPurchase = await tx.purchase.create({
+      data: {
+        tenantId: req.tenantId,
+        supplierId,
+        invoiceNumber,
+        invoiceDate: invoiceDate ? new Date(invoiceDate) : undefined,
+        notes,
+        status: PurchaseStatus.CONFIRMED,
+        subtotal: new Decimal(subtotal),
+        totalAmount: new Decimal(subtotal),
+        details: {
+          create: items.map((i) => ({
+            productId: i.productId,
+            quantityOrdered: i.quantityOrdered,
+            unitCost: new Decimal(i.unitCost),
+            subtotal: new Decimal(i.quantityOrdered * i.unitCost),
+          })),
+        },
       },
-    },
-    include: {
-      supplier: { select: { id: true, name: true } },
-      details: { include: { product: { select: { id: true, name: true, internalCode: true } } } },
-    },
+      include: {
+        supplier: { select: { id: true, name: true } },
+        details: { include: { product: { select: { id: true, name: true, internalCode: true } } } },
+      },
+    });
+
+    // 2. Crear cuenta por pagar
+    await tx.accountsPayable.create({
+      data: {
+        tenantId: req.tenantId,
+        supplierId,
+        purchaseId: newPurchase.id,
+        description: `Compra${invoiceNumber ? ` Factura ${invoiceNumber}` : ''}`,
+        totalAmount: new Decimal(subtotal),
+        paidAmount: new Decimal(0),
+        remainingAmount: new Decimal(subtotal),
+      },
+    });
+
+    // 3. Crear recepción de mercadería (ingreso automático)
+    const receipt = await tx.goodsReceipt.create({
+      data: {
+        tenantId: req.tenantId,
+        purchaseId: newPurchase.id,
+        receivedById: userId,
+        status: GoodsReceiptStatus.COMPLETE,
+        notes,
+        details: {
+          create: newPurchase.details.map((pd) => ({
+            purchaseDetailId: pd.id,
+            productId: pd.productId,
+            quantityExpected: pd.quantityOrdered,
+            quantityReceived: pd.quantityOrdered,
+            difference: 0,
+            unitCost: pd.unitCost,
+          })),
+        },
+      },
+      include: { details: true },
+    });
+
+    // 4. Actualizar stock de cada producto
+    for (const item of items) {
+      const product = await tx.product.findUnique({
+        where: { id: item.productId },
+        select: { currentStock: true },
+      });
+      if (!product) continue;
+
+      const stockBefore = product.currentStock;
+      const stockAfter = stockBefore + item.quantityOrdered;
+
+      await tx.product.update({
+        where: { id: item.productId },
+        data: { currentStock: stockAfter },
+      });
+
+      await tx.stockMovement.create({
+        data: {
+          tenantId: req.tenantId,
+          productId: item.productId,
+          type: StockMovementType.INGRESO_COMPRA,
+          quantity: item.quantityOrdered,
+          stockBefore,
+          stockAfter,
+          unitCost: new Decimal(item.unitCost),
+          referenceType: 'GOODS_RECEIPT',
+          referenceId: receipt.id,
+          createdById: userId,
+        },
+      });
+    }
+
+    // 5. Marcar compra como recibida
+    return tx.purchase.update({
+      where: { id: newPurchase.id },
+      data: { status: PurchaseStatus.FULLY_RECEIVED },
+      include: {
+        supplier: { select: { id: true, name: true } },
+        details: { include: { product: { select: { id: true, name: true, internalCode: true } } } },
+      },
+    });
   });
 
   res.status(201).json(successResponse(purchase, 'Compra registrada'));

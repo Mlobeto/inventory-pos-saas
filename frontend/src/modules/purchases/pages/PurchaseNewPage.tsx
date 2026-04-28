@@ -24,6 +24,11 @@ interface LineItem {
   showPrices: boolean;
 }
 
+interface NewProductFormValues extends CreateProductDto {
+  quantityOrdered: number;
+  unitCost: number;
+}
+
 interface PurchaseFormValues {
   invoiceNumber: string;
   invoiceDate: string;
@@ -53,6 +58,8 @@ export default function PurchaseNewPage() {
   const [searchResults, setSearchResults] = useState<Product[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [newProductModal, setNewProductModal] = useState(false);
+  const [newProdPrices, setNewProdPrices] = useState<Record<string, number>>({});
+  const [newProdMarkup, setNewProdMarkup] = useState(0);
   const productTimeout = useRef<ReturnType<typeof setTimeout>>();
 
   const {
@@ -65,7 +72,7 @@ export default function PurchaseNewPage() {
     handleSubmit: handleProdSubmit,
     reset: resetProd,
     formState: { errors: prodErrors, isSubmitting: prodSubmitting },
-  } = useForm<CreateProductDto>({ defaultValues: { unit: 'UN', minStock: 0 } });
+  } = useForm<NewProductFormValues>({ defaultValues: { unit: 'UN', minStock: 0, quantityOrdered: 1, unitCost: 0 } });
 
   const {
     register: registerSupp,
@@ -83,11 +90,6 @@ export default function PurchaseNewPage() {
 
   const createProdMut = useMutation({
     mutationFn: createProduct,
-    onSuccess: (prod) => {
-      addItem(prod);
-      setNewProductModal(false);
-      resetProd({ unit: 'UN', minStock: 0 });
-    },
   });
 
   const createSuppMut = useMutation({
@@ -172,7 +174,9 @@ export default function PurchaseNewPage() {
   }, [productSearch]);
 
   function openNewProductModal(barcode?: string) {
-    resetProd({ unit: 'UN', minStock: 0, barcode: barcode ?? '' });
+    resetProd({ unit: 'UN', minStock: 0, barcode: barcode ?? '', quantityOrdered: 1, unitCost: 0 });
+    setNewProdPrices({});
+    setNewProdMarkup(0);
     setNewProductModal(true);
     setShowDropdown(false);
   }
@@ -205,6 +209,59 @@ export default function PurchaseNewPage() {
         showPrices: true,
       },
     ]);
+  }
+
+  function addItemFull(product: Product, qty: number, cost: number, prices: Record<string, number>, markup: number) {
+    setShowDropdown(false);
+    setProductSearch('');
+    const existing = items.findIndex((i) => i.productId === product.id);
+    if (existing >= 0) {
+      setItems((prev) =>
+        prev.map((it, idx) => idx === existing ? { ...it, quantityOrdered: it.quantityOrdered + qty } : it),
+      );
+      return;
+    }
+    const hasPrices = Object.values(prices).some((v) => v > 0);
+    setItems((prev) => [
+      ...prev,
+      {
+        productId: product.id,
+        productName: product.name,
+        productCode: product.internalCode,
+        quantityOrdered: qty,
+        unitCost: cost,
+        prices,
+        publicMarkup: markup,
+        showPrices: hasPrices,
+      },
+    ]);
+  }
+
+  function updateModalPrice(methodId: string, value: number) {
+    setNewProdPrices((prev) => {
+      const updated = { ...prev, [methodId]: value };
+      const cashMethod = paymentMethods.find((m) => m.code === 'CASH');
+      const publicMethod = paymentMethods.find((m) => m.code === 'PUBLIC');
+      if (cashMethod && publicMethod && methodId === cashMethod.id && newProdMarkup > 0) {
+        updated[publicMethod.id] = parseFloat((value * (1 + newProdMarkup / 100)).toFixed(2));
+      }
+      return updated;
+    });
+  }
+
+  function updateModalMarkup(markup: number) {
+    setNewProdMarkup(markup);
+    const cashMethod = paymentMethods.find((m) => m.code === 'CASH');
+    const publicMethod = paymentMethods.find((m) => m.code === 'PUBLIC');
+    if (cashMethod && publicMethod) {
+      const cashPrice = newProdPrices[cashMethod.id] ?? 0;
+      if (cashPrice > 0 && markup > 0) {
+        setNewProdPrices((prev) => ({
+          ...prev,
+          [publicMethod.id]: parseFloat((cashPrice * (1 + markup / 100)).toFixed(2)),
+        }));
+      }
+    }
   }
 
   function removeItem(idx: number) {
@@ -568,8 +625,24 @@ export default function PurchaseNewPage() {
       </Modal>
 
       {/* Modal nuevo producto */}
-      <Modal isOpen={newProductModal} onClose={() => { setNewProductModal(false); resetProd({ unit: 'UN', minStock: 0 }); }} title="Nuevo producto" size="md">
-        <form onSubmit={handleProdSubmit((values) => createProdMut.mutate(values))} className="space-y-4">
+      <Modal isOpen={newProductModal} onClose={() => { setNewProductModal(false); resetProd({ unit: 'UN', minStock: 0, quantityOrdered: 1, unitCost: 0 }); setNewProdPrices({}); setNewProdMarkup(0); }} title="Nuevo producto" size="md">
+        <form
+          onSubmit={handleProdSubmit(async (values) => {
+            const { quantityOrdered, unitCost, ...productDto } = values;
+            const prod = await createProdMut.mutateAsync(productDto);
+            addItemFull(prod, quantityOrdered, unitCost, newProdPrices, newProdMarkup);
+            // Guardar precios del nuevo producto
+            const pricesToSave = Object.entries(newProdPrices).filter(([, p]) => p > 0).map(([methodId, price]) => ({ paymentMethodId: methodId, price }));
+            if (pricesToSave.length > 0) {
+              await upsertProductPrices(prod.id, pricesToSave);
+            }
+            setNewProductModal(false);
+            resetProd({ unit: 'UN', minStock: 0, quantityOrdered: 1, unitCost: 0 });
+            setNewProdPrices({});
+            setNewProdMarkup(0);
+          })}
+          className="space-y-4"
+        >
           <Input label="Nombre *" error={prodErrors.name?.message} {...registerProd('name', { required: 'Requerido' })} />
           <Input
             label="Código de barras"
@@ -578,10 +651,81 @@ export default function PurchaseNewPage() {
           />
           <div className="grid grid-cols-2 gap-3">
             <Input label="Unidad" {...registerProd('unit')} />
+            <Input label="Stock mínimo" type="number" min="0" {...registerProd('minStock', { valueAsNumber: true })} />
           </div>
-          <Input label="Stock mínimo" type="number" min="0" {...registerProd('minStock', { valueAsNumber: true })} />
+
+          {/* Cantidad y costo para esta compra */}
+          <div className="border-t border-gray-100 pt-4">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Para esta compra</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Cantidad</label>
+                <input
+                  type="number"
+                  min="1"
+                  {...registerProd('quantityOrdered', { valueAsNumber: true, min: 1 })}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 text-center"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Costo unitario</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    {...registerProd('unitCost', { valueAsNumber: true })}
+                    className="w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 text-right"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Precios de venta por lista */}
+          {paymentMethods.length > 0 && (
+            <div className="border-t border-gray-100 pt-4">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Precios de venta por lista</p>
+              <div className="flex items-center gap-2 mb-3">
+                <label className="text-xs text-gray-500 whitespace-nowrap">% recargo Efectivo → Otros:</label>
+                <div className="relative w-24">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    placeholder="0"
+                    value={newProdMarkup || ''}
+                    onChange={(e) => updateModalMarkup(parseFloat(e.target.value) || 0)}
+                    className="w-full pr-6 pl-2 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 text-right"
+                  />
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {paymentMethods.map((method) => (
+                  <div key={method.id}>
+                    <label className="block text-xs text-gray-500 mb-0.5">{getPriceTierLabel(method)}</label>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0,00"
+                        value={newProdPrices[method.id] ?? ''}
+                        onChange={(e) => updateModalPrice(method.id, parseFloat(e.target.value) || 0)}
+                        className="w-full pl-5 pr-2 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 text-right"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="secondary" onClick={() => setNewProductModal(false)}>Cancelar</Button>
+            <Button type="button" variant="secondary" onClick={() => { setNewProductModal(false); setNewProdPrices({}); setNewProdMarkup(0); }}>Cancelar</Button>
             <Button type="submit" isLoading={prodSubmitting || createProdMut.isPending}>Crear y agregar</Button>
           </div>
         </form>

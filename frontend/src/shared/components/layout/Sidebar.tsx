@@ -45,7 +45,6 @@ const navGroups: NavGroup[] = [
     label: 'Compras',
     items: [
       { to: ROUTES.PURCHASES,       label: 'Órdenes de Compra', icon: Truck,    permission: 'purchases:read' },
-      { to: ROUTES.GOODS_RECEIPTS,  label: 'Recepciones',       icon: Package,  permission: 'purchases:read' },
       { to: ROUTES.ACCOUNTS_PAYABLE,label: 'Cuentas por Pagar', icon: DollarSign, permission: 'accounts-payable:read' },
     ],
   },

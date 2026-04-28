@@ -17,9 +17,12 @@ interface AuthState {
   accessToken: string | null;
   refreshToken: string | null;
   isAuthenticated: boolean;
+  sessionExpired: boolean;
   login: (user: AuthUser, accessToken: string, refreshToken: string) => void;
   logout: () => void;
+  logoutExpired: () => void;
   setTokens: (accessToken: string, refreshToken: string) => void;
+  clearSessionExpired: () => void;
   hasPermission: (permission: string) => boolean;
 }
 
@@ -30,12 +33,18 @@ export const useAuthStore = create<AuthState>()(
       accessToken: null,
       refreshToken: null,
       isAuthenticated: false,
+      sessionExpired: false,
 
       login: (user, accessToken, refreshToken) =>
-        set({ user, accessToken, refreshToken, isAuthenticated: true }),
+        set({ user, accessToken, refreshToken, isAuthenticated: true, sessionExpired: false }),
 
       logout: () =>
-        set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false }),
+        set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false, sessionExpired: false }),
+
+      logoutExpired: () =>
+        set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false, sessionExpired: true }),
+
+      clearSessionExpired: () => set({ sessionExpired: false }),
 
       setTokens: (accessToken, refreshToken) => set({ accessToken, refreshToken }),
 

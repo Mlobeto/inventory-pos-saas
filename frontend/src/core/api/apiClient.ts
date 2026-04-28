@@ -66,7 +66,7 @@ apiClient.interceptors.response.use(
         return apiClient(originalRequest);
       } catch (err) {
         processQueue(err, null);
-        useAuthStore.getState().logout();
+        useAuthStore.getState().logoutExpired();
         return Promise.reject(err);
       } finally {
         isRefreshing = false;

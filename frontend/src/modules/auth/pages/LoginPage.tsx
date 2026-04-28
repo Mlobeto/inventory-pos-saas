@@ -5,6 +5,7 @@ import { useAuthStore } from '../../../core/auth/authStore';
 import { LoginForm } from '../components/LoginForm';
 import { Card } from '../../../shared/components/ui/Card';
 import { ROUTES } from '../../../router/routes';
+import logo from '@/assets/dalevir.png';
 
 export default function LoginPage() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -19,9 +20,9 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-gray-100 flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Dale Vir!</h1>
-          <p className="text-gray-500 mt-1 text-sm">Gestión de inventario y punto de venta</p>
+        <div className="flex flex-col items-center mb-8">
+          <img src={logo} alt="Dale Vir!" className="h-28 w-28 object-contain mb-2" />
+          <p className="text-gray-500 text-sm">Gestión de inventario y punto de venta</p>
         </div>
         {sessionExpired && (
           <div className="flex items-start gap-3 mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">

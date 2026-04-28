@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { cn } from '../../utils/cn';
 import { ROUTES } from '@/router/routes';
+import logo from '@/assets/dalevir.png';
 
 interface TopbarProps {
   onMenuClick: () => void;
@@ -22,13 +23,16 @@ export function Topbar({ onMenuClick }: TopbarProps) {
 
   return (
     <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 sticky top-0 z-30">
-      <button
-        onClick={onMenuClick}
-        className="lg:hidden p-2 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100"
-        aria-label="Abrir menú"
-      >
-        <Menu className="h-5 w-5" />
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onMenuClick}
+          className="lg:hidden p-2 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+          aria-label="Abrir menú"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <img src={logo} alt="Dale Vir!" className="h-8 w-8 object-contain lg:hidden" />
+      </div>
 
       <div className="ml-auto relative">
         <button

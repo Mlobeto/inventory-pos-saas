@@ -1,6 +1,8 @@
 import type { Sale } from '../api/salesApi';
+import logoUrl from '@/assets/dalevir.png';
 
-const STORE_NAME = 'Dale vir! Tienda de regalos';
+const STORE_NAME = 'Dale Vir!';
+const STORE_SUBTITLE = 'Tienda de regalos';
 const STORE_CUIT = '27-28570590-3';
 
 interface ReceiptOptions {
@@ -65,7 +67,9 @@ export function printThermalReceipt({ sale, cashierName, discountAmount = 0 }: R
     .bold { font-weight: bold; }
     .sep-solid { border-top: 1px solid #000; margin: 2mm 0; }
     .sep-dash  { border-top: 1px dashed #000; margin: 2mm 0; }
+    .store-logo { display: block; width: 22mm; height: 22mm; object-fit: contain; margin: 0 auto 1.5mm; }
     .store-name { font-size: 10.5px; font-weight: bold; text-align: center; line-height: 1.3; }
+    .store-subtitle { font-size: 8.5px; text-align: center; margin-top: 0.5mm; }
     .sale-num { font-size: 9.5px; font-weight: bold; text-align: center; margin: 1mm 0 0.5mm; }
     table { width: 100%; border-collapse: collapse; }
     td { padding: 0.8mm 0; vertical-align: top; }
@@ -80,7 +84,9 @@ export function printThermalReceipt({ sale, cashierName, discountAmount = 0 }: R
   </style>
 </head>
 <body>
+  <img src="${logoUrl}" alt="Dale Vir!" class="store-logo" />
   <div class="store-name">${STORE_NAME}</div>
+  <div class="store-subtitle">${STORE_SUBTITLE}</div>
   <div class="center">CUIT: ${STORE_CUIT}</div>
   <div class="sep-solid"></div>
 

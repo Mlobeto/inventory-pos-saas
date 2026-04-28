@@ -15,6 +15,7 @@ import {
 import { cn } from '../../utils/cn';
 import { useAuthStore } from '@/core/auth/authStore';
 import { ROUTES } from '@/router/routes';
+import logo from '@/assets/dalevir.png';
 
 interface NavItem {
   to: string;
@@ -100,10 +101,13 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         )}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700">
-          <div>
-            <p className="font-bold text-base leading-tight">Dale Vir!</p>
-            <p className="text-xs text-gray-400 mt-0.5">{user?.tenantSlug ?? ''}</p>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+          <div className="flex items-center gap-3">
+            <img src={logo} alt="Dale Vir!" className="h-10 w-10 object-contain rounded-full" />
+            <div>
+              <p className="font-bold text-sm leading-tight">Dale Vir!</p>
+              <p className="text-xs text-gray-400 mt-0.5">{user?.tenantSlug ?? ''}</p>
+            </div>
           </div>
           <button onClick={onClose} className="lg:hidden text-gray-400 hover:text-white">
             <X className="h-5 w-5" />

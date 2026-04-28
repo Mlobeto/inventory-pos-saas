@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 import { Outlet } from 'react-router-dom';
+import { PwaInstallBanner } from '../ui/PwaInstallBanner';
 
 export function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -15,6 +16,7 @@ export function AppLayout() {
           <Outlet />
         </main>
       </div>
+      <PwaInstallBanner />
     </div>
   );
 }

@@ -11,6 +11,9 @@ import { registerRoutes } from './routes';
 export function createApp(): express.Application {
   const app = express();
 
+  // Confiar en el proxy de Render/Railway/Vercel (necesario para rate-limit y IPs reales)
+  app.set('trust proxy', 1);
+
   // ── Seguridad ──────────────────────────────────────────────────────────────
   app.use(helmet());
 

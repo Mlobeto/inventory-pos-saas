@@ -24,6 +24,7 @@ const CustomerStatementPage = lazy(() => import('../modules/customers/pages/Cust
 const AfipSettingsPage = lazy(() => import('../modules/settings/pages/AfipSettingsPage'));
 const SettingsPage = lazy(() => import('../modules/settings/pages/SettingsPage'));
 const SaleReturnsPage = lazy(() => import('../modules/sale-returns/pages/SaleReturnsPage'));
+const UsersPage = lazy(() => import('../modules/users/pages/UsersPage'));
 
 function PageLoader() {
   return (
@@ -67,6 +68,7 @@ export default function AppRouter() {
           <Route path={ROUTES.REPORTS} element={<StubPage title="Reportes" />} />
           <Route path={ROUTES.SETTINGS} element={<SettingsPage />} />
           <Route path={ROUTES.AFIP_SETTINGS} element={<AfipSettingsPage />} />
+          <Route path={ROUTES.USERS} element={<UsersPage />} />
         </Route>
 
         <Route path="*" element={<Navigate to={ROUTES.DASHBOARD} replace />} />

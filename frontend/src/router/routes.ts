@@ -21,4 +21,5 @@ export const ROUTES = {
   REPORTS: '/reportes',
   SETTINGS: '/configuracion',
   AFIP_SETTINGS: '/configuracion/afip',
+  USERS: '/usuarios',
 } as const;

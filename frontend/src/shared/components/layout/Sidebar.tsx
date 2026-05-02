@@ -62,6 +62,7 @@ const navGroups: NavGroup[] = [
       { to: ROUTES.SUPPLIERS,  label: 'Proveedores',   icon: Truck,     permission: 'suppliers:read' },
       { to: ROUTES.CUSTOMERS,  label: 'Clientes',      icon: Users,     permission: 'customers:read' },
       { to: ROUTES.REPORTS,    label: 'Reportes',      icon: BarChart2, permission: 'reports:view' },
+      { to: ROUTES.USERS,      label: 'Usuarios',      icon: Users,     permission: 'users:read' },
       { to: ROUTES.SETTINGS,   label: 'Configuración', icon: Settings,  permission: 'tenant:settings' },
     ],
   },

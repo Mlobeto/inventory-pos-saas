@@ -34,4 +34,8 @@ export const UserService = {
   async delete(tenantId: string, userId: string) {
     return UserRepository.softDelete(tenantId, userId);
   },
+
+  async changePassword(tenantId: string, userId: string, newPassword: string) {
+    return UserRepository.changePassword(tenantId, userId, newPassword);
+  },
 };

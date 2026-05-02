@@ -3,13 +3,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { UserPlus, Pencil, Trash2, ShieldCheck, X } from 'lucide-react';
+import { UserPlus, Pencil, Trash2, ShieldCheck, X, KeyRound } from 'lucide-react';
 import {
   getUsers,
   getRoles,
   createUser,
   updateUser,
   deleteUser,
+  changeUserPassword,
   type UserListItem,
   type UserStatus,
 } from '../api/usersApi';
@@ -327,11 +328,98 @@ function EditUserModal({
   );
 }
 
+// ─── Modal Cambiar contraseña ──────────────────────────────────────────────────
+const changePasswordSchema = z.object({
+  password: z
+    .string()
+    .min(8, 'Mínimo 8 caracteres')
+    .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, 'Debe tener mayúsculas, minúsculas y números'),
+  confirm: z.string(),
+}).refine((d) => d.password === d.confirm, {
+  message: 'Las contraseñas no coinciden',
+  path: ['confirm'],
+});
+
+type ChangePasswordForm = z.infer<typeof changePasswordSchema>;
+
+function ChangePasswordModal({
+  user,
+  onClose,
+}: {
+  user: UserListItem;
+  onClose: () => void;
+}) {
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<ChangePasswordForm>({
+    resolver: zodResolver(changePasswordSchema),
+  });
+
+  const mut = useMutation({
+    mutationFn: (data: ChangePasswordForm) => changeUserPassword(user.id, data.password),
+    onSuccess: onClose,
+  });
+
+  const apiError =
+    mut.error && 'response' in mut.error
+      ? (mut.error as { response?: { data?: { message?: string } } }).response?.data?.message
+      : undefined;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/40">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-bold text-gray-900">
+            Cambiar contraseña
+          </h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <p className="text-sm text-gray-500 mb-4">
+          {user.firstName} {user.lastName} · {user.email}
+        </p>
+        <form onSubmit={handleSubmit((data) => mut.mutate(data))} className="space-y-4">
+          <Input
+            label="Nueva contraseña"
+            type="password"
+            placeholder="Mín. 8 caracteres, mayúsc., minúsc. y números"
+            error={errors.password?.message}
+            {...register('password')}
+          />
+          <Input
+            label="Confirmar contraseña"
+            type="password"
+            error={errors.confirm?.message}
+            {...register('confirm')}
+          />
+          {apiError && (
+            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+              {apiError}
+            </p>
+          )}
+          <div className="flex gap-3 pt-1">
+            <Button type="button" variant="secondary" onClick={onClose} className="flex-1">
+              Cancelar
+            </Button>
+            <Button type="submit" isLoading={mut.isPending} className="flex-1">
+              Guardar
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ─── Página principal ──────────────────────────────────────────────────────────
 export default function UsersPage() {
   const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserListItem | null>(null);
+  const [changingPasswordUser, setChangingPasswordUser] = useState<UserListItem | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const { data: users = [], isLoading } = useQuery({
@@ -415,6 +503,13 @@ export default function UsersPage() {
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2 justify-end">
                       <button
+                        onClick={() => setChangingPasswordUser(user)}
+                        className="text-gray-400 hover:text-brand-600 transition-colors"
+                        title="Cambiar contraseña"
+                      >
+                        <KeyRound className="h-4 w-4" />
+                      </button>
+                      <button
                         onClick={() => setEditingUser(user)}
                         className="text-gray-400 hover:text-brand-600 transition-colors"
                         title="Editar"
@@ -464,6 +559,12 @@ export default function UsersPage() {
           user={editingUser}
           roles={roles}
           onClose={() => setEditingUser(null)}
+        />
+      )}
+      {changingPasswordUser && (
+        <ChangePasswordModal
+          user={changingPasswordUser}
+          onClose={() => setChangingPasswordUser(null)}
         />
       )}
     </div>

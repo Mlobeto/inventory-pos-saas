@@ -52,6 +52,10 @@ export async function deleteUser(id: string): Promise<void> {
   await apiClient.delete(`/api/users/${id}`);
 }
 
+export async function changeUserPassword(id: string, password: string): Promise<void> {
+  await apiClient.patch(`/api/users/${id}/password`, { password });
+}
+
 export async function getRoles(): Promise<Role[]> {
   const res = await apiClient.get('/api/roles', { params: { limit: 50 } });
   return res.data.data;

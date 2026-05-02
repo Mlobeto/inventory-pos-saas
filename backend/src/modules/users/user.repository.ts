@@ -214,4 +214,17 @@ export const UserRepository = {
       data: { deletedAt: new Date(), status: UserStatus.INACTIVE },
     });
   },
+
+  async changePassword(tenantId: string, userId: string, newPassword: string): Promise<void> {
+    const user = await prisma.user.findFirst({
+      where: { id: userId, tenantId, deletedAt: null },
+    });
+    if (!user) throw AppError.notFound('Usuario');
+
+    const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+    await prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+    });
+  },
 };

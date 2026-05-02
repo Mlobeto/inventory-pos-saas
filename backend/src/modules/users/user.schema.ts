@@ -20,3 +20,13 @@ export const updateUserSchema = z.object({
   status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).optional(),
   roleIds: z.array(z.string().cuid()).optional(),
 });
+
+export const changePasswordSchema = z.object({
+  password: z
+    .string()
+    .min(8, 'La contraseña debe tener al menos 8 caracteres')
+    .regex(
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/,
+      'La contraseña debe contener mayúsculas, minúsculas y números',
+    ),
+});

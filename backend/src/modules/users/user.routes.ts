@@ -4,7 +4,7 @@ import { authMiddleware, requirePermission } from '../../core/middleware/auth.mi
 import { tenancyMiddleware } from '../../core/tenancy/tenancy.middleware';
 import { validate } from '../../core/middleware/validate.middleware';
 import { asyncHandler } from '../../core/middleware/asyncHandler';
-import { createUserSchema, updateUserSchema } from './user.schema';
+import { createUserSchema, updateUserSchema, changePasswordSchema } from './user.schema';
 
 export const userRouter = Router();
 
@@ -46,4 +46,12 @@ userRouter.delete(
   '/:id',
   requirePermission('users:delete'),
   asyncHandler(UserController.delete),
+);
+
+// PATCH /api/users/:id/password
+userRouter.patch(
+  '/:id/password',
+  requirePermission('users:write'),
+  validate(changePasswordSchema),
+  asyncHandler(UserController.changePassword),
 );

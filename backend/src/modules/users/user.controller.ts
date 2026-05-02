@@ -29,4 +29,9 @@ export const UserController = {
     await UserService.delete(req.tenantId, req.params.id);
     res.json(successResponse(null, 'Usuario eliminado'));
   },
+
+  async changePassword(req: Request, res: Response): Promise<void> {
+    await UserService.changePassword(req.tenantId, req.params.id, req.body.password);
+    res.json(successResponse(null, 'Contraseña actualizada'));
+  },
 };

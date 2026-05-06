@@ -119,51 +119,49 @@ async function main() {
   }
   console.log(`✅ Rol: ${cashierRole.name}`);
 
-  // --- Usuario administrador ---
+  // --- Usuario administrador: Luciana ---
   const adminPasswordHash = await bcrypt.hash('Admin1234!', 12);
 
-  const adminUser = await prisma.user.upsert({
-    where: { tenantId_email: { tenantId: tenant.id, email: 'admin@demo.com' } },
+  const lucianaUser = await prisma.user.upsert({
+    where: { tenantId_email: { tenantId: tenant.id, email: 'luciana@admin.com' } },
     update: {},
     create: {
       tenantId: tenant.id,
-      email: 'admin@demo.com',
+      email: 'luciana@admin.com',
       passwordHash: adminPasswordHash,
-      firstName: 'Admin',
-      lastName: 'Demo',
+      firstName: 'Luciana',
+      lastName: 'Admin',
       status: UserStatus.ACTIVE,
     },
   });
 
   await prisma.userRole.upsert({
-    where: { userId_roleId: { userId: adminUser.id, roleId: adminRole.id } },
+    where: { userId_roleId: { userId: lucianaUser.id, roleId: adminRole.id } },
     update: {},
-    create: { userId: adminUser.id, roleId: adminRole.id },
+    create: { userId: lucianaUser.id, roleId: adminRole.id },
   });
-  console.log(`✅ Usuario admin: ${adminUser.email} / Admin1234!`);
+  console.log(`✅ Usuario admin: ${lucianaUser.email} / Admin1234!`);
 
-  // --- Usuario cajero ---
-  const cashierPasswordHash = await bcrypt.hash('Cajero1234!', 12);
-
-  const cashierUser = await prisma.user.upsert({
-    where: { tenantId_email: { tenantId: tenant.id, email: 'cajero@demo.com' } },
+  // --- Usuario administrador: Agustín ---
+  const agustinUser = await prisma.user.upsert({
+    where: { tenantId_email: { tenantId: tenant.id, email: 'agustin@admin.com' } },
     update: {},
     create: {
       tenantId: tenant.id,
-      email: 'cajero@demo.com',
-      passwordHash: cashierPasswordHash,
-      firstName: 'Cajero',
-      lastName: 'Demo',
+      email: 'agustin@admin.com',
+      passwordHash: adminPasswordHash,
+      firstName: 'Agustín',
+      lastName: 'Admin',
       status: UserStatus.ACTIVE,
     },
   });
 
   await prisma.userRole.upsert({
-    where: { userId_roleId: { userId: cashierUser.id, roleId: cashierRole.id } },
+    where: { userId_roleId: { userId: agustinUser.id, roleId: adminRole.id } },
     update: {},
-    create: { userId: cashierUser.id, roleId: cashierRole.id },
+    create: { userId: agustinUser.id, roleId: adminRole.id },
   });
-  console.log(`✅ Usuario cajero: ${cashierUser.email} / Cajero1234!`);
+  console.log(`✅ Usuario admin: ${agustinUser.email} / Admin1234!`);
 
   // --- Métodos de pago por defecto ---
   // isPriceTier=true → aparece como lista de precio en el formulario de productos
@@ -222,8 +220,8 @@ async function main() {
 
   console.log('\n🎉 Seed completado exitosamente.');
   console.log('   Tenant slug: demo');
-  console.log('   Login admin:  admin@demo.com  / Admin1234!');
-  console.log('   Login cajero: cajero@demo.com / Cajero1234!');
+  console.log('   Login admin:  luciana@admin.com / Admin1234!');
+  console.log('   Login admin:  agustin@admin.com / Admin1234!');
 }
 
 main()

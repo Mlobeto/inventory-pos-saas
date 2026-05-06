@@ -1,0 +1,43 @@
+name: DB Backup Nightly
+
+on:
+  schedule:
+    # Todos los días a las 03:00 UTC (00:00 Argentina / ART)
+    - cron: '0 3 * * *'
+  workflow_dispatch: # permite correrlo manualmente desde GitHub
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install postgresql-client
+        run: sudo apt-get install -y postgresql-client
+
+      - name: Run pg_dump
+        env:
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          FILENAME="backup_${TIMESTAMP}.sql"
+
+          pg_dump \
+            --host=ep-bold-haze-anxevkjx-pooler.c-6.us-east-1.aws.neon.tech \
+            --port=5432 \
+            --username=neondb_owner \
+            --dbname=neondb \
+            --no-password \
+            --format=plain \
+            --file="${FILENAME}"
+
+          # Comprimir para ahorrar espacio
+          gzip "${FILENAME}"
+          echo "BACKUP_FILE=${FILENAME}.gz" >> $GITHUB_ENV
+
+      - name: Upload backup as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ github.run_number }}
+          path: "*.sql.gz"
+          # Los artifacts se retienen 90 días por defecto en GitHub
+          retention-days: 90

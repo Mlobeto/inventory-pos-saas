@@ -154,6 +154,11 @@ export default function ProductsPage() {
   const meta = data?.meta;
   const isSaving = isSubmitting || createMut.isPending || updateMut.isPending;
 
+  function renderPublicCashPrice(r: Product) {
+    const cashPrice = r.productPrices.find((pp) => pp.paymentMethod.code === 'CASH')?.price;
+    return cashPrice ? `$ ${parseFloat(cashPrice).toFixed(2)}` : '—';
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -198,6 +203,7 @@ export default function ProductsPage() {
           },
           { key: 'type', header: 'Tipo', render: (r) => r.type === 'REVENTA' ? 'Reventa' : 'Personalizado' },
           { key: 'unit', header: 'Unidad' },
+          { key: 'publicCashPrice', header: 'Público efectivo', render: renderPublicCashPrice },
           {
             key: 'currentStock',
             header: 'Stock',

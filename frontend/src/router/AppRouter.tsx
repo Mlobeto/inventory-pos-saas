@@ -25,6 +25,7 @@ const AfipSettingsPage = lazy(() => import('../modules/settings/pages/AfipSettin
 const SettingsPage = lazy(() => import('../modules/settings/pages/SettingsPage'));
 const SaleReturnsPage = lazy(() => import('../modules/sale-returns/pages/SaleReturnsPage'));
 const UsersPage = lazy(() => import('../modules/users/pages/UsersPage'));
+const InventoryPage = lazy(() => import('../modules/inventory/pages/InventoryPage'));
 
 function PageLoader() {
   return (
@@ -61,7 +62,7 @@ export default function AppRouter() {
           <Route path={ROUTES.GOODS_RECEIPTS} element={<StubPage title="Recepciones" />} />
           <Route path={ROUTES.ACCOUNTS_PAYABLE} element={<StubPage title="Cuentas por Pagar" />} />
           <Route path={ROUTES.PRODUCTS} element={<ProductsPage />} />
-          <Route path={ROUTES.INVENTORY} element={<StubPage title="Inventario" />} />
+          <Route path={ROUTES.INVENTORY} element={<InventoryPage />} />
           <Route path={ROUTES.SUPPLIERS} element={<SuppliersPage />} />
           <Route path={ROUTES.CUSTOMERS} element={<CustomersPage />} />
           <Route path={ROUTES.CUSTOMER_STATEMENT} element={<CustomerStatementPage />} />

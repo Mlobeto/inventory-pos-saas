@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { Search, AlertTriangle, Plus, Minus } from 'lucide-react';
+import { Search, Plus, Minus } from 'lucide-react';
 import {
   getStock,
   adjustStock,
@@ -210,7 +210,7 @@ export default function InventoryPage() {
             <Button
               type="submit"
               disabled={isSaving}
-              loading={isSaving}
+              isLoading={isSaving}
             >
               {adjustType === 'AJUSTE_POSITIVO' ? 'Aumentar' : 'Disminuir'} Stock
             </Button>

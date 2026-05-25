@@ -1,5 +1,5 @@
-import { apiClient } from '@/core/api/apiClient';
-import type { PaginationResponse } from '@/shared/types/api.types';
+import apiClient from '@/core/api/apiClient';
+import type { PaginatedResponse } from '@/shared/types/api.types';
 
 export interface StockItem {
   id: string;
@@ -36,7 +36,7 @@ export async function getStock(params?: {
   limit?: number;
   search?: string;
   lowStock?: boolean;
-}): Promise<PaginationResponse<StockItem>> {
+}): Promise<PaginatedResponse<StockItem>> {
   const queryParams = new URLSearchParams();
   if (params?.page) queryParams.append('page', params.page.toString());
   if (params?.limit) queryParams.append('limit', params.limit.toString());
@@ -54,7 +54,7 @@ export async function getStockMovements(params?: {
   limit?: number;
   productId?: string;
   type?: string;
-}): Promise<PaginationResponse<StockMovement>> {
+}): Promise<PaginatedResponse<StockMovement>> {
   const queryParams = new URLSearchParams();
   if (params?.page) queryParams.append('page', params.page.toString());
   if (params?.limit) queryParams.append('limit', params.limit.toString());

@@ -44,7 +44,7 @@ export async function getStock(params?: {
   if (params?.lowStock) queryParams.append('lowStock', 'true');
 
   const res = await apiClient.get(
-    `/inventory/stock?${queryParams.toString()}`,
+    `/api/inventory/stock?${queryParams.toString()}`,
   );
   return res.data;
 }
@@ -62,7 +62,7 @@ export async function getStockMovements(params?: {
   if (params?.type) queryParams.append('type', params.type);
 
   const res = await apiClient.get(
-    `/inventory/movements?${queryParams.toString()}`,
+    `/api/inventory/movements?${queryParams.toString()}`,
   );
   return res.data;
 }
@@ -73,6 +73,6 @@ export async function adjustStock(dto: {
   quantity: number;
   notes?: string;
 }): Promise<StockMovement> {
-  const res = await apiClient.post('/inventory/adjustments', dto);
+  const res = await apiClient.post('/api/inventory/adjustments', dto);
   return res.data;
 }

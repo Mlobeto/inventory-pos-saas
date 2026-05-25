@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Search, Plus, Minus } from 'lucide-react';
+import axios from 'axios';
 import {
   getStock,
   adjustStock,
@@ -26,7 +27,7 @@ export default function InventoryPage() {
   const [selectedItem, setSelectedItem] = useState<StockItem | null>(null);
   const [adjustType, setAdjustType] = useState<'AJUSTE_POSITIVO' | 'AJUSTE_NEGATIVO'>('AJUSTE_POSITIVO');
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ['inventory-stock', page, search],
     queryFn: () => getStock({ page, limit: 20, search: search || undefined }),
   });
@@ -81,6 +82,18 @@ export default function InventoryPage() {
         <h1 className="text-2xl font-bold text-gray-900">Inventario</h1>
       </div>
 
+      {isError && (
+        <div
+          role="alert"
+          className="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800"
+        >
+          No se pudo cargar el inventario.
+          {axios.isAxiosError(error) && error.response?.status
+            ? ` El servidor respondió con el código ${error.response.status}.`
+            : ''}
+        </div>
+      )}
+
       <div className="flex gap-2">
         <Input
           placeholder="Buscar por nombre o código..."
@@ -103,7 +116,9 @@ export default function InventoryPage() {
       <Table
         isLoading={isLoading}
         rowKey={(r) => r.id}
-        emptyMessage="No hay productos en el inventario"
+        emptyMessage={
+          isError ? 'Corregí el error arriba o volvé a intentar.' : 'No hay productos en el inventario'
+        }
         data={products}
         columns={[
           { key: 'internalCode', header: 'Código', className: 'font-mono text-xs' },

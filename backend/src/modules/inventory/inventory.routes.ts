@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authMiddleware, requirePermission } from '../../core/middleware/auth.middleware';
+import { authMiddleware, requirePermission, requireRole } from '../../core/middleware/auth.middleware';
 import { tenancyMiddleware } from '../../core/tenancy/tenancy.middleware';
 import { asyncHandler } from '../../core/middleware/asyncHandler';
 import { prisma } from '../../config/database';
@@ -82,8 +82,12 @@ inventoryRouter.get('/movements', requirePermission('inventory:read'), asyncHand
   res.json(paginatedResponse(movements, buildPaginationMeta(total, pagination)));
 }));
 
-// POST /api/inventory/adjustments — ajuste manual de stock
-inventoryRouter.post('/adjustments', requirePermission('inventory:adjust'), asyncHandler(async (req, res) => {
+// POST /api/inventory/adjustments — ajuste manual de stock (solo administradores)
+inventoryRouter.post(
+  '/adjustments',
+  requirePermission('inventory:adjust'),
+  requireRole('Administrador'),
+  asyncHandler(async (req, res) => {
   const { productId, type, quantity, notes } = req.body as {
     productId: string;
     type: 'AJUSTE_POSITIVO' | 'AJUSTE_NEGATIVO';

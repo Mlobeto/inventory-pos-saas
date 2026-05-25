@@ -24,6 +24,8 @@ interface AuthState {
   setTokens: (accessToken: string, refreshToken: string) => void;
   clearSessionExpired: () => void;
   hasPermission: (permission: string) => boolean;
+  hasRole: (role: string) => boolean;
+  isAdmin: () => boolean;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -52,6 +54,18 @@ export const useAuthStore = create<AuthState>()(
         const { user } = get();
         if (!user) return false;
         return user.permissions.includes(permission);
+      },
+
+      hasRole: (role) => {
+        const { user } = get();
+        if (!user) return false;
+        return user.roles.includes(role);
+      },
+
+      isAdmin: () => {
+        const { user } = get();
+        if (!user) return false;
+        return user.roles.includes('Administrador');
       },
     }),
     {

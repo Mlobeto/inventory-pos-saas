@@ -52,3 +52,18 @@ export function requirePermission(...permissionCodes: string[]) {
     next();
   };
 }
+
+export function requireRole(...roleNames: string[]) {
+  return (req: Request, _res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      throw AppError.unauthorized();
+    }
+
+    const hasRole = roleNames.some((role) => req.user!.roles.includes(role));
+    if (!hasRole) {
+      throw AppError.forbidden(`Rol requerido: ${roleNames.join(' o ')}`);
+    }
+
+    next();
+  };
+}

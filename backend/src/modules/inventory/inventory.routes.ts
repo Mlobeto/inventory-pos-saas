@@ -26,6 +26,11 @@ inventoryRouter.get('/stock', requirePermission('inventory:read'), asyncHandler(
       OR: [
         { name: { contains: search, mode: 'insensitive' as const } },
         { internalCode: { contains: search, mode: 'insensitive' as const } },
+        {
+          productCodes: {
+            some: { code: { contains: search, mode: 'insensitive' as const } },
+          },
+        },
       ],
     }),
     ...(lowStock && { currentStock: { lte: prisma.product.fields.minStock } }),

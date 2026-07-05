@@ -1,0 +1,18 @@
+# Base de datos local SOLO para desarrollo (no producción).
+# Uso: docker compose up -d
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: inventory-pos-db-local
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: inventory_pos
+    volumes:
+      - inventory_pos_pgdata:/var/lib/postgresql/data
+
+volumes:
+  inventory_pos_pgdata:

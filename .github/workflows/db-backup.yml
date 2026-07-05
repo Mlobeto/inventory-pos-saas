@@ -3,8 +3,9 @@
 # Configurar UNO de estos en GitHub → Settings → Secrets and variables → Actions:
 #
 # Opción A (recomendada): secret DATABASE_URL
-#   postgresql://USER:PASSWORD@ep-xxx.us-east-1.aws.neon.tech/neondb?sslmode=require
-#   Usar conexión DIRECTA de Neon (sin "-pooler" en el host).
+#   Copiá la URL COMPLETA desde Neon (incluye usuario:contraseña@host).
+#   Ejemplo: postgresql://USER:PASSWORD@ep-xxx.us-east-1.aws.neon.tech/neondb?sslmode=require
+#   Preferí conexión DIRECTA (host sin "-pooler"). pg_dump no necesita el pooler.
 #
 # Opción B: secrets sueltos
 #   NEON_PGHOST, NEON_PGUSER, NEON_PGPASSWORD, NEON_PGDATABASE
@@ -24,7 +25,7 @@ jobs:
       - name: Install postgresql-client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
 
-      - name: Run pg_dump
+      - name: Configure database credentials
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           PGHOST: ${{ secrets.NEON_PGHOST }}
@@ -34,31 +35,93 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -z "$DATABASE_URL" ] && { [ -z "$PGHOST" ] || [ -z "$PGUSER" ] || [ -z "$PGPASSWORD" ] || [ -z "$PGDATABASE" ]; }; then
-            echo "::error::Falta configuración de backup."
-            echo "Agregá DATABASE_URL o los secrets NEON_PGHOST, NEON_PGUSER, NEON_PGPASSWORD y NEON_PGDATABASE en GitHub Actions."
-            exit 1
-          fi
+          python3 <<'PY'
+          import os
+          import sys
+          import urllib.parse
+
+          def fail(msg: str) -> None:
+              print(f"::error::{msg}")
+              sys.exit(1)
+
+          def emit(key: str, value: str) -> None:
+              # GitHub Actions multiline env
+              with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
+                  fh.write(f"{key}={value}\n")
+
+          database_url = (os.environ.get("DATABASE_URL") or "").strip()
+
+          if database_url:
+              parsed = urllib.parse.urlparse(database_url)
+              if parsed.scheme not in ("postgresql", "postgres"):
+                  fail("DATABASE_URL debe empezar con postgresql://")
+              if not parsed.hostname:
+                  fail("DATABASE_URL no incluye host.")
+              if not parsed.username:
+                  fail("DATABASE_URL no incluye usuario.")
+              if not parsed.password:
+                  fail(
+                      "DATABASE_URL no incluye contraseña. "
+                      "En GitHub → Settings → Secrets → Actions, actualizá DATABASE_URL "
+                      "con la URL completa de Neon (usuario:contraseña@host)."
+                  )
+
+              host = parsed.hostname
+              # pg_dump funciona mejor con endpoint directo, no pooler
+              if "-pooler" in host:
+                  host = host.replace("-pooler", "")
+                  print(f"Nota: usando endpoint directo para pg_dump ({host})")
+
+              database = urllib.parse.unquote((parsed.path or "").lstrip("/")) or "neondb"
+              emit("PGHOST", host)
+              emit("PGUSER", urllib.parse.unquote(parsed.username))
+              emit("PGPASSWORD", urllib.parse.unquote(parsed.password))
+              emit("PGDATABASE", database)
+              emit("PGSSLMODE", "require")
+              print("Credenciales cargadas desde DATABASE_URL.")
+              sys.exit(0)
+
+          required = {
+              "NEON_PGHOST": os.environ.get("PGHOST", "").strip(),
+              "NEON_PGUSER": os.environ.get("PGUSER", "").strip(),
+              "NEON_PGPASSWORD": os.environ.get("PGPASSWORD", "").strip(),
+              "NEON_PGDATABASE": os.environ.get("PGDATABASE", "").strip(),
+          }
+
+          missing = [name for name, value in required.items() if not value]
+          if missing:
+              fail(
+                  "Falta configuración de backup. "
+                  "Agregá el secret DATABASE_URL (URL completa con contraseña) "
+                  f"o estos secrets: {', '.join(missing)}"
+              )
+
+          host = required["NEON_PGHOST"]
+          if "-pooler" in host:
+              host = host.replace("-pooler", "")
+              print(f"Nota: usando endpoint directo para pg_dump ({host})")
+
+          emit("PGHOST", host)
+          emit("PGUSER", required["NEON_PGUSER"])
+          emit("PGPASSWORD", required["NEON_PGPASSWORD"])
+          emit("PGDATABASE", required["NEON_PGDATABASE"])
+          emit("PGSSLMODE", "require")
+          print("Credenciales cargadas desde secrets NEON_*.")
+          PY
+
+      - name: Run pg_dump
+        run: |
+          set -euo pipefail
 
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
           FILENAME="backup_${TIMESTAMP}.sql"
 
-          if [ -n "$DATABASE_URL" ]; then
-            echo "Usando DATABASE_URL..."
-            pg_dump "$DATABASE_URL" \
-              --format=plain \
-              --no-owner \
-              --no-acl \
-              --file="${FILENAME}"
-          else
-            echo "Usando credenciales NEON_* (host: ${PGHOST})..."
-            export PGSSLMODE=require
-            pg_dump \
-              --format=plain \
-              --no-owner \
-              --no-acl \
-              --file="${FILENAME}"
-          fi
+          echo "Conectando a ${PGHOST} como ${PGUSER}, base ${PGDATABASE}..."
+          pg_dump \
+            --format=plain \
+            --no-owner \
+            --no-acl \
+            --file="${FILENAME}"
 
           gzip "${FILENAME}"
           ls -lh "${FILENAME}.gz"

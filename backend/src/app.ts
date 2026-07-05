@@ -67,7 +67,11 @@ export function createApp(): express.Application {
 
   // ── Health check (sin auth, sin tenant) ───────────────────────────────────
   app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      version: '2026-07-05-reports',
+    });
   });
 
   // ── Rutas de la API ────────────────────────────────────────────────────────

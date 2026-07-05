@@ -52,10 +52,10 @@ const MOVEMENT_TYPE_LABELS: Record<ReportMovementType, string> = {
   PURCHASE: 'Compra',
 };
 
-const MOVEMENT_TYPE_VARIANT: Record<ReportMovementType, 'green' | 'red' | 'amber' | 'blue'> = {
+const MOVEMENT_TYPE_VARIANT: Record<ReportMovementType, 'green' | 'red' | 'yellow' | 'blue'> = {
   SALE: 'green',
   EXPENSE: 'red',
-  RETURN: 'amber',
+  RETURN: 'yellow',
   PURCHASE: 'blue',
 };
 

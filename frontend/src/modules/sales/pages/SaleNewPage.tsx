@@ -121,7 +121,6 @@ function SuccessScreen({
 // ─── Página principal POS ─────────────────────────────────────────────────────
 export default function SaleNewPage() {
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const location = useLocation();
   const exchangeReturnId = (location.state as { exchangeReturnId?: string } | null)?.exchangeReturnId;
   const authUser = useAuthStore((s) => s.user);

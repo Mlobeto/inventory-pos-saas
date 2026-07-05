@@ -27,6 +27,7 @@ export interface SaleReturn {
   type: 'REFUND' | 'EXCHANGE';
   reason: string;
   totalAmount: string;
+  replacementSaleId?: string | null;
   createdAt: string;
   sale: { saleNumber: string };
   processedBy: { firstName: string; lastName: string };
@@ -62,6 +63,11 @@ export async function getSaleReturns(params?: {
 }): Promise<SaleReturnsPage> {
   const res = await apiClient.get('/api/sale-returns', { params });
   return res.data;
+}
+
+export async function getSaleReturn(id: string): Promise<SaleReturn> {
+  const res = await apiClient.get(`/api/sale-returns/${id}`);
+  return res.data.data;
 }
 
 export async function createSaleReturn(dto: CreateSaleReturnDto): Promise<SaleReturn> {

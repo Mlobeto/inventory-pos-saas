@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import {
   Search, Plus, Minus, Trash2, CheckCircle, AlertCircle,
   ShoppingCart, Clock, ChevronDown, Printer, UserRound, X, UserPlus, ArrowLeftRight,
@@ -14,6 +14,7 @@ import {
   getPriceTierLabel,
 } from '@/modules/payment-methods/api/paymentMethodsApi';
 import { getCurrentShift } from '@/modules/cash-shifts/api/cashShiftsApi';
+import { getSaleReturn } from '@/modules/sale-returns/api/saleReturnsApi';
 import { useAuthStore } from '@/core/auth/authStore';
 import { printThermalReceipt } from '../utils/thermalReceipt';
 import { Button } from '@/shared/components/ui/Button';
@@ -120,6 +121,9 @@ function SuccessScreen({
 // ─── Página principal POS ─────────────────────────────────────────────────────
 export default function SaleNewPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const exchangeReturnId = (location.state as { exchangeReturnId?: string } | null)?.exchangeReturnId;
   const authUser = useAuthStore((s) => s.user);
   const cashierName = authUser ? `${authUser.firstName} ${authUser.lastName}` : 'Cajero';
 
@@ -180,6 +184,17 @@ export default function SaleNewPage() {
     queryKey: ['cash-shift-current'],
     queryFn: getCurrentShift,
   });
+
+  const { data: linkedReturn } = useQuery({
+    queryKey: ['exchange-return', exchangeReturnId],
+    queryFn: () => getSaleReturn(exchangeReturnId!),
+    enabled: !!exchangeReturnId,
+  });
+
+  useEffect(() => {
+    if (!linkedReturn || linkedReturn.replacementSaleId) return;
+    setExchangeCredit(String(Number(linkedReturn.totalAmount)));
+  }, [linkedReturn]);
 
   const { data: allMethods = [] } = useQuery({
     queryKey: ['payment-methods'],
@@ -339,7 +354,13 @@ export default function SaleNewPage() {
 
   const discount = parseFloat(globalDiscount) || 0;
   const totalAmount = Math.max(0, cartSubtotal - discount);
-  const exchangeCreditAmount = parseFloat(exchangeCredit) || 0;
+  const linkedCreditAmount =
+    exchangeReturnId && linkedReturn && !linkedReturn.replacementSaleId
+      ? Math.min(Number(linkedReturn.totalAmount), totalAmount)
+      : 0;
+  const exchangeCreditAmount = linkedCreditAmount > 0
+    ? linkedCreditAmount
+    : parseFloat(exchangeCredit) || 0;
   const totalPaid = payments.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0) + exchangeCreditAmount;
   const remaining = totalAmount - totalPaid;
   const hasChange = totalPaid > totalAmount + 0.005;
@@ -455,8 +476,8 @@ export default function SaleNewPage() {
       return p;
     });
 
-    // Inyectar crédito por devolución como pago adicional si aplica
-    if (exchangeCreditAmount > 0 && exchangeCreditMethod) {
+    // Inyectar crédito por devolución manual (sin devolución vinculada)
+    if (!exchangeReturnId && exchangeCreditAmount > 0 && exchangeCreditMethod) {
       paymentsToValidate.push({
         rowId: 'exchange-credit',
         methodId: exchangeCreditMethod.id,
@@ -465,12 +486,21 @@ export default function SaleNewPage() {
       });
     }
 
+    if (linkedReturn?.replacementSaleId) {
+      setFormError('Esta devolución ya fue utilizada en otro cambio');
+      return;
+    }
+
     const validPayments = paymentsToValidate.filter(
       (p) => p.methodId && parseFloat(p.amount) > 0,
     );
-    if (validPayments.length === 0) { setFormError('Registrá al menos un pago'); return; }
+    if (validPayments.length === 0 && !(exchangeReturnId && exchangeCreditAmount >= totalAmount - 0.01)) {
+      setFormError('Registrá al menos un pago');
+      return;
+    }
 
-    const newTotalPaid = validPayments.reduce((acc, p) => acc + parseFloat(p.amount), 0);
+    const paymentsSum = validPayments.reduce((acc, p) => acc + parseFloat(p.amount), 0);
+    const newTotalPaid = exchangeReturnId ? paymentsSum + exchangeCreditAmount : paymentsSum;
     if (newTotalPaid < totalAmount - 0.01) { setFormError(`Falta cobrar ${fmt(totalAmount - newTotalPaid)}`); return; }
 
     // Advertencia: CREDIT_ACCOUNT requiere cliente
@@ -500,6 +530,7 @@ export default function SaleNewPage() {
       notes: notes || undefined,
       discountAmount: discount || undefined,
       customerId: customerId || undefined,
+      exchangeReturnId: exchangeReturnId || undefined,
     });
   }
 
@@ -761,6 +792,25 @@ export default function SaleNewPage() {
           </div>
         </div>
       </div>
+
+      {exchangeReturnId && linkedReturn && !linkedReturn.replacementSaleId && (
+        <div className="mb-4 flex gap-2 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-900">
+          <ArrowLeftRight className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+          <p>
+            <strong>Venta de cambio</strong> vinculada a la devolución de{' '}
+            <span className="font-mono">{linkedReturn.sale.saleNumber}</span>.
+            Crédito disponible: <strong>{fmt(Number(linkedReturn.totalAmount))}</strong>.
+            {' '}Solo se sumará a caja la diferencia que cobres en efectivo u otro medio real.
+          </p>
+        </div>
+      )}
+
+      {exchangeReturnId && linkedReturn?.replacementSaleId && (
+        <div className="mb-4 flex gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-800">
+          <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+          Esta devolución ya fue utilizada en otro cambio.
+        </div>
+      )}
 
       {/* ── Layout dos columnas ── */}
       <div className="flex flex-col lg:flex-row gap-4 lg:gap-5 lg:items-start">
@@ -1078,7 +1128,7 @@ export default function SaleNewPage() {
                 </button>
 
                 {/* Crédito por devolución (cambio de producto) */}
-                {exchangeCreditMethod && (
+                {exchangeCreditMethod && !exchangeReturnId && (
                   <div className="flex gap-2 items-center bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-1">
                     <ArrowLeftRight className="h-3.5 w-3.5 text-amber-600 flex-shrink-0" />
                     <span className="text-xs text-amber-700 font-medium flex-1 whitespace-nowrap">Crédito cambio</span>
@@ -1095,6 +1145,13 @@ export default function SaleNewPage() {
                         className="w-full pl-5 pr-2 py-1.5 border border-amber-300 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
                       />
                     </div>
+                  </div>
+                )}
+
+                {exchangeReturnId && linkedReturn && !linkedReturn.replacementSaleId && exchangeCreditAmount > 0 && (
+                  <div className="flex justify-between text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-1">
+                    <span>Crédito por cambio (no ingresa a caja)</span>
+                    <span className="font-semibold tabular-nums">{fmt(exchangeCreditAmount)}</span>
                   </div>
                 )}
 

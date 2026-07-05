@@ -30,6 +30,13 @@ cashExpenseRouter.post('/', requirePermission('cash-expenses:write'), asyncHandl
   };
   const userId = req.user!.sub;
 
+  if (!description?.trim()) {
+    throw AppError.validation('El concepto del gasto es requerido');
+  }
+  if (!amount || amount <= 0) {
+    throw AppError.validation('El monto del gasto debe ser mayor a cero');
+  }
+
   const shift = await prisma.cashShift.findFirst({
     where: { tenantId: req.tenantId, openedById: userId, status: CashShiftStatus.OPEN },
   });
@@ -39,9 +46,9 @@ cashExpenseRouter.post('/', requirePermission('cash-expenses:write'), asyncHandl
     data: {
       tenantId: req.tenantId,
       cashShiftId: shift.id,
-      description,
+      description: description.trim(),
       amount: new Decimal(amount),
-      category,
+      category: category?.trim() || undefined,
       createdById: userId,
     },
   });

@@ -1,15 +1,21 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
   Clock, DollarSign, TrendingUp, TrendingDown, CreditCard,
-  ChevronRight, Printer, X, AlertTriangle, ShoppingCart,
+  ChevronRight, Printer, X, AlertTriangle, ShoppingCart, ArrowLeftRight, Plus, Trash2, Receipt,
 } from 'lucide-react';
 import {
   openShift, closeShift, getCurrentShift, getCashShifts,
   type CashShift,
 } from '../api/cashShiftsApi';
 import { getShiftDetail } from '../api/cashShiftsApi';
+import {
+  getCashExpenses,
+  createCashExpense,
+  deleteCashExpense,
+  type CashExpenseRecord,
+} from '@/modules/cash-expenses/api/cashExpensesApi';
 import { getPaymentMethods, type PaymentMethod } from '@/modules/payment-methods/api/paymentMethodsApi';
 import { Button } from '@/shared/components/ui/Button';
 import { Input } from '@/shared/components/ui/Input';
@@ -23,6 +29,211 @@ function fmt(amount: string | number | null | undefined): string {
 
 function fmtDate(date: string): string {
   return new Date(date).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+const EXPENSE_CATEGORIES = [
+  'Suministros',
+  'Delivery / envíos',
+  'Limpieza',
+  'Mantenimiento',
+  'Viáticos',
+  'Varios',
+] as const;
+
+// ─── Modal: registrar gasto ───────────────────────────────────────────────────
+function AddExpenseModal({
+  isOpen,
+  onClose,
+  onSubmit,
+  isLoading,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (data: { description: string; amount: number; category?: string }) => void;
+  isLoading: boolean;
+}) {
+  const [description, setDescription] = useState('');
+  const [amount, setAmount] = useState('');
+  const [category, setCategory] = useState('');
+  const [error, setError] = useState('');
+
+  function reset() {
+    setDescription('');
+    setAmount('');
+    setCategory('');
+    setError('');
+  }
+
+  function handleClose() {
+    reset();
+    onClose();
+  }
+
+  useEffect(() => {
+    if (!isOpen) reset();
+  }, [isOpen]);
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!description.trim()) {
+      setError('Ingresá el concepto del gasto');
+      return;
+    }
+    const val = parseFloat(amount);
+    if (isNaN(val) || val <= 0) {
+      setError('Ingresá un monto válido mayor a cero');
+      return;
+    }
+    onSubmit({
+      description: description.trim(),
+      amount: val,
+      category: category || undefined,
+    });
+  }
+
+  return (
+    <Modal isOpen={isOpen} onClose={handleClose} title="Registrar gasto de caja" size="sm">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Input
+          label="Concepto *"
+          placeholder="Ej: Compra de bolsas, delivery, limpieza..."
+          value={description}
+          onChange={(e) => { setDescription(e.target.value); setError(''); }}
+        />
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Categoría (opcional)</label>
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+          >
+            <option value="">Sin categoría</option>
+            {EXPENSE_CATEGORIES.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
+
+        <Input
+          label="Monto *"
+          type="number"
+          min="0.01"
+          step="0.01"
+          placeholder="0,00"
+          value={amount}
+          onChange={(e) => { setAmount(e.target.value); setError(''); }}
+        />
+
+        {error && (
+          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Button type="button" variant="secondary" onClick={handleClose} disabled={isLoading}>
+            Cancelar
+          </Button>
+          <Button type="submit" isLoading={isLoading}>
+            Registrar gasto
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+// ─── Gastos del turno activo ──────────────────────────────────────────────────
+function ShiftExpensesPanel({ shiftId }: { shiftId: string }) {
+  const queryClient = useQueryClient();
+  const [modalOpen, setModalOpen] = useState(false);
+
+  const { data: expenses = [], isLoading } = useQuery({
+    queryKey: ['cash-expenses', shiftId],
+    queryFn: () => getCashExpenses(shiftId),
+  });
+
+  const createMut = useMutation({
+    mutationFn: createCashExpense,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cash-expenses', shiftId] });
+      queryClient.invalidateQueries({ queryKey: ['cash-shift-current'] });
+      setModalOpen(false);
+    },
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: deleteCashExpense,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cash-expenses', shiftId] });
+      queryClient.invalidateQueries({ queryKey: ['cash-shift-current'] });
+    },
+  });
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+        <div className="flex items-center gap-2">
+          <Receipt className="h-4 w-4 text-gray-500" />
+          <h3 className="font-semibold text-gray-900">Gastos del turno</h3>
+        </div>
+        <Button
+          size="sm"
+          variant="secondary"
+          leftIcon={<Plus className="h-4 w-4" />}
+          onClick={() => setModalOpen(true)}
+        >
+          Registrar gasto
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <p className="text-sm text-gray-400 text-center py-8">Cargando gastos...</p>
+      ) : expenses.length === 0 ? (
+        <p className="text-sm text-gray-400 text-center py-8">
+          No hay gastos registrados en este turno.
+        </p>
+      ) : (
+        <div className="divide-y divide-gray-100">
+          {expenses.map((expense: CashExpenseRecord) => (
+            <div key={expense.id} className="flex items-center justify-between gap-3 px-5 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-gray-900 truncate">{expense.description}</p>
+                <p className="text-xs text-gray-400">
+                  {fmtDate(expense.createdAt)}
+                  {expense.category ? ` · ${expense.category}` : ''}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <span className="text-sm font-semibold text-red-600 tabular-nums">
+                  -{fmt(expense.amount)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm('¿Eliminar este gasto?')) {
+                      deleteMut.mutate(expense.id);
+                    }
+                  }}
+                  disabled={deleteMut.isPending}
+                  className="text-gray-300 hover:text-red-500 transition-colors p-1"
+                  title="Eliminar gasto"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <AddExpenseModal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        isLoading={createMut.isPending}
+        onSubmit={(data) => createMut.mutate(data)}
+      />
+    </div>
+  );
 }
 
 // ─── Sub-componente: turno sin abrir ─────────────────────────────────────────
@@ -157,7 +368,7 @@ function ActiveShiftPanel({
           <h3 className="text-sm font-semibold text-gray-700 mb-3">Cobros por método de pago</h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
             {paymentMethods
-              .filter((pm) => !pm.isPriceTier)
+              .filter((pm) => !pm.isPriceTier && pm.code !== 'EXCHANGE_CREDIT')
               .map((pm) => {
                 const found = summary!.paymentBreakdown.find(
                   (pb) => (pb as any).paymentMethodCode === pm.code,
@@ -175,6 +386,17 @@ function ActiveShiftPanel({
         </div>
       )}
 
+      {summary?.exchangeCreditTotal && parseFloat(summary.exchangeCreditTotal) > 0 && (
+        <div className="bg-amber-50 rounded-lg border border-amber-200 p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <ArrowLeftRight className="h-4 w-4 text-amber-600" />
+            <span className="text-xs font-medium text-amber-800 uppercase tracking-wide">Créditos por cambio</span>
+          </div>
+          <p className="text-lg font-bold text-amber-900">{fmt(summary.exchangeCreditTotal)}</p>
+          <p className="text-xs text-amber-700 mt-1">No suma efectivo en caja</p>
+        </div>
+      )}
+
       {/* Estadísticas */}
       <div className="flex gap-3 text-sm text-gray-500">
         <span className="bg-gray-100 rounded px-3 py-1">
@@ -184,6 +406,8 @@ function ActiveShiftPanel({
           {shift._count?.cashExpenses ?? 0} gastos
         </span>
       </div>
+
+      <ShiftExpensesPanel shiftId={shift.id} />
     </div>
   );
 }
@@ -214,7 +438,10 @@ function CloseShiftModal({
 
   // Métodos de pago no-priceTier con movimientos en este turno
   const breakdown = shift.summary?.paymentBreakdown ?? [];
-  const nonCashBreakdown = breakdown.filter((b) => b.paymentMethodCode !== 'CASH');
+  const nonCashBreakdown = breakdown.filter(
+    (b) => b.paymentMethodCode !== 'CASH' && b.paymentMethodCode !== 'EXCHANGE_CREDIT',
+  );
+  const exchangeCreditBreakdown = breakdown.find((b) => b.paymentMethodCode === 'EXCHANGE_CREDIT');
   const cashBreakdown = breakdown.find((b) => b.paymentMethodCode === 'CASH');
 
   function handleConfirm() {
@@ -252,6 +479,13 @@ function CloseShiftModal({
                 </div>
               ))}
             </>
+          )}
+
+          {exchangeCreditBreakdown && parseFloat(exchangeCreditBreakdown._sum.amount) > 0 && (
+            <div className="flex justify-between pl-2 mt-1">
+              <span className="text-amber-700">Crédito por cambio (virtual)</span>
+              <span className="font-medium text-amber-800">{fmt(exchangeCreditBreakdown._sum.amount)}</span>
+            </div>
           )}
 
           <div className="flex justify-between border-t border-gray-200 pt-2">
@@ -401,12 +635,14 @@ function ShiftDetailModal({
     </Modal>
   );
 
-  const pmBreakdown = shift.salePayments.reduce<Record<string, { name: string; total: number }>>((acc, sp) => {
+  const pmBreakdown = shift.salePayments.reduce<Record<string, { name: string; total: number; code: string }>>((acc, sp) => {
     const code = sp.paymentMethod.code;
-    if (!acc[code]) acc[code] = { name: sp.paymentMethod.name, total: 0 };
+    if (!acc[code]) acc[code] = { name: sp.paymentMethod.name, total: 0, code };
     acc[code].total += parseFloat(sp.amount);
     return acc;
   }, {});
+
+  const exchangeCreditTotal = pmBreakdown.EXCHANGE_CREDIT?.total ?? 0;
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Detalle del turno" size="lg">
@@ -430,12 +666,20 @@ function ShiftDetailModal({
         {/* Resumen */}
         <div className="bg-gray-50 rounded-lg p-4 text-sm space-y-2">
           <div className="flex justify-between"><span className="text-gray-500">Apertura</span><span>{fmt(shift.initialAmount)}</span></div>
-          {Object.entries(pmBreakdown).map(([code, v]) => (
+          {Object.entries(pmBreakdown)
+            .filter(([code]) => code !== 'EXCHANGE_CREDIT')
+            .map(([code, v]) => (
             <div key={code} className="flex justify-between">
               <span className="text-gray-500">{v.name}</span>
               <span className="font-medium text-green-700">{fmt(v.total)}</span>
             </div>
           ))}
+          {exchangeCreditTotal > 0 && (
+            <div className="flex justify-between">
+              <span className="text-amber-700">Crédito por cambio (virtual)</span>
+              <span className="font-medium text-amber-800">{fmt(exchangeCreditTotal)}</span>
+            </div>
+          )}
           {shift.cashExpenses.length > 0 && (
             <div className="flex justify-between">
               <span className="text-gray-500">Gastos</span>

@@ -103,7 +103,7 @@ saleReturnRouter.post('/', requirePermission('sale-returns:write'), asyncHandler
         reason,
         totalAmount: new Decimal(totalAmount),
         processedById: userId,
-        cashShiftId: type === SaleReturnType.REFUND && openShift ? openShift.id : undefined,
+        cashShiftId: openShift ? openShift.id : undefined,
         details: {
           create: items.map((i) => ({
             saleDetailId: i.saleDetailId,

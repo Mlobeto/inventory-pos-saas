@@ -6,7 +6,7 @@ import { prisma } from '../../config/database';
 import { successResponse, paginatedResponse } from '../../core/utils/response';
 import { parsePagination, buildPaginationMeta } from '../../core/utils/pagination';
 import { AppError } from '../../core/errors/AppError';
-import { CashShiftStatus, SaleStatus, StockMovementType, Prisma } from '@prisma/client';
+import { CashShiftStatus, SaleStatus, StockMovementType, SaleReturnType, Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { formatSaleNumber, SEQUENCE_ENTITIES } from '../../shared/constants';
 
@@ -118,7 +118,7 @@ saleRouter.get('/:id', requirePermission('sales:read'), asyncHandler(async (req,
  * Todo en una sola transacción atómica.
  */
 saleRouter.post('/', requirePermission('sales:create'), asyncHandler(async (req, res) => {
-  const { items, payments, notes, discountAmount: saleDiscount, customerId } = req.body as {
+  const { items, payments, notes, discountAmount: saleDiscount, customerId, exchangeReturnId } = req.body as {
     items: Array<{
       productId: string;
       quantity: number;
@@ -135,6 +135,7 @@ saleRouter.post('/', requirePermission('sales:create'), asyncHandler(async (req,
     notes?: string;
     discountAmount?: number;
     customerId?: string;
+    exchangeReturnId?: string;
   };
 
   const userId = req.user!.sub;
@@ -160,6 +161,56 @@ saleRouter.post('/', requirePermission('sales:create'), asyncHandler(async (req,
     );
     const discountAmount = saleDiscount ?? 0;
     const totalAmount = subtotal - discountAmount;
+
+    let finalPayments = [...payments];
+    let linkedExchangeReturnId: string | null = null;
+
+    if (exchangeReturnId) {
+      const saleReturn = await tx.saleReturn.findFirst({
+        where: {
+          id: exchangeReturnId,
+          tenantId: req.tenantId,
+          type: SaleReturnType.EXCHANGE,
+          replacementSaleId: null,
+        },
+      });
+      if (!saleReturn) {
+        throw AppError.validation('La devolución de cambio no existe o ya fue utilizada');
+      }
+
+      const exchangeMethod = await tx.paymentMethod.findFirst({
+        where: { tenantId: req.tenantId, code: 'EXCHANGE_CREDIT', isActive: true },
+      });
+      if (!exchangeMethod) {
+        throw AppError.validation('Método de pago "Crédito por devolución" no configurado');
+      }
+
+      const incomingMethods = await tx.paymentMethod.findMany({
+        where: { id: { in: payments.map((p) => p.paymentMethodId) }, tenantId: req.tenantId },
+        select: { id: true, code: true },
+      });
+      const incomingMap = new Map(incomingMethods.map((m) => [m.id, m.code]));
+
+      const creditAmount = Math.min(Number(saleReturn.totalAmount), totalAmount);
+      finalPayments = payments.filter((p) => incomingMap.get(p.paymentMethodId) !== 'EXCHANGE_CREDIT');
+
+      if (creditAmount > 0) {
+        finalPayments.push({
+          paymentMethodId: exchangeMethod.id,
+          amount: creditAmount,
+        });
+      }
+
+      const paidTotal = finalPayments.reduce((acc, p) => acc + p.amount, 0);
+      if (paidTotal < totalAmount - 0.01) {
+        throw AppError.validation('Los pagos no cubren el total. Solo debe cobrarse la diferencia del cambio.');
+      }
+      if (paidTotal > totalAmount + 0.01) {
+        throw AppError.validation('Los pagos superan el total de la venta');
+      }
+
+      linkedExchangeReturnId = saleReturn.id;
+    }
 
     // Crear la venta
     const newSale = await tx.sale.create({
@@ -190,7 +241,7 @@ saleRouter.post('/', requirePermission('sales:create'), asyncHandler(async (req,
 
     // Registrar pagos
     await tx.salePayment.createMany({
-      data: payments.map((p) => ({
+      data: finalPayments.map((p) => ({
         tenantId: req.tenantId,
         saleId: newSale.id,
         cashShiftId: shift.id,
@@ -200,13 +251,20 @@ saleRouter.post('/', requirePermission('sales:create'), asyncHandler(async (req,
       })),
     });
 
+    if (linkedExchangeReturnId) {
+      await tx.saleReturn.update({
+        where: { id: linkedExchangeReturnId },
+        data: { replacementSaleId: newSale.id },
+      });
+    }
+
     // Si hay pago en cuenta corriente, crear CustomerReceivable
     const paymentMethods = await tx.paymentMethod.findMany({
-      where: { id: { in: payments.map((p) => p.paymentMethodId) }, tenantId: req.tenantId },
+      where: { id: { in: finalPayments.map((p) => p.paymentMethodId) }, tenantId: req.tenantId },
       select: { id: true, code: true },
     });
     const methodMap = new Map(paymentMethods.map((m) => [m.id, m.code]));
-    const creditPayment = payments.find((p) => methodMap.get(p.paymentMethodId) === 'CREDIT_ACCOUNT');
+    const creditPayment = finalPayments.find((p) => methodMap.get(p.paymentMethodId) === 'CREDIT_ACCOUNT');
     if (creditPayment) {
       if (!customerId) throw AppError.validation('Cuenta corriente requiere que se seleccione un cliente');
       await tx.customerReceivable.create({

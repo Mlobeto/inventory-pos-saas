@@ -8,6 +8,7 @@ import { Spinner } from '../shared/components/ui/Spinner';
 const LoginPage = lazy(() => import('../modules/auth/pages/LoginPage'));
 const DashboardPage = lazy(() => import('../modules/dashboard/pages/DashboardPage'));
 const StubPage = lazy(() => import('../modules/stub/StubPage'));
+const ReportsPage = lazy(() => import('../modules/reports/pages/ReportsPage'));
 const SuppliersPage = lazy(() => import('../modules/suppliers/pages/SuppliersPage'));
 const ProductsPage = lazy(() => import('../modules/products/pages/ProductsPage'));
 const PurchasesListPage = lazy(() => import('../modules/purchases/pages/PurchasesListPage'));
@@ -66,7 +67,7 @@ export default function AppRouter() {
           <Route path={ROUTES.SUPPLIERS} element={<SuppliersPage />} />
           <Route path={ROUTES.CUSTOMERS} element={<CustomersPage />} />
           <Route path={ROUTES.CUSTOMER_STATEMENT} element={<CustomerStatementPage />} />
-          <Route path={ROUTES.REPORTS} element={<StubPage title="Reportes" />} />
+          <Route path={ROUTES.REPORTS} element={<ReportsPage />} />
           <Route path={ROUTES.SETTINGS} element={<SettingsPage />} />
           <Route path={ROUTES.AFIP_SETTINGS} element={<AfipSettingsPage />} />
           <Route path={ROUTES.USERS} element={<UsersPage />} />

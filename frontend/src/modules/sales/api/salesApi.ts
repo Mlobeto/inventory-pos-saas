@@ -63,6 +63,7 @@ export interface CreateSaleDto {
   notes?: string;
   discountAmount?: number;
   customerId?: string;
+  exchangeReturnId?: string;
 }
 
 export interface SaleDetailItem {

@@ -1,10 +1,20 @@
+# Backup nocturno de la base Neon.
+#
+# Configurar UNO de estos en GitHub → Settings → Secrets and variables → Actions:
+#
+# Opción A (recomendada): secret DATABASE_URL
+#   postgresql://USER:PASSWORD@ep-xxx.us-east-1.aws.neon.tech/neondb?sslmode=require
+#   Usar conexión DIRECTA de Neon (sin "-pooler" en el host).
+#
+# Opción B: secrets sueltos
+#   NEON_PGHOST, NEON_PGUSER, NEON_PGPASSWORD, NEON_PGDATABASE
+
 name: DB Backup Nightly
 
 on:
   schedule:
-    # Todos los días a las 03:00 UTC (00:00 Argentina / ART)
     - cron: '0 3 * * *'
-  workflow_dispatch: # permite correrlo manualmente desde GitHub
+  workflow_dispatch:
 
 jobs:
   backup:
@@ -12,32 +22,50 @@ jobs:
 
     steps:
       - name: Install postgresql-client
-        run: sudo apt-get install -y postgresql-client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
 
       - name: Run pg_dump
         env:
-          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PGHOST: ${{ secrets.NEON_PGHOST }}
+          PGUSER: ${{ secrets.NEON_PGUSER }}
+          PGPASSWORD: ${{ secrets.NEON_PGPASSWORD }}
+          PGDATABASE: ${{ secrets.NEON_PGDATABASE }}
         run: |
+          set -euo pipefail
+
+          if [ -z "$DATABASE_URL" ] && { [ -z "$PGHOST" ] || [ -z "$PGUSER" ] || [ -z "$PGPASSWORD" ] || [ -z "$PGDATABASE" ]; }; then
+            echo "::error::Falta configuración de backup."
+            echo "Agregá DATABASE_URL o los secrets NEON_PGHOST, NEON_PGUSER, NEON_PGPASSWORD y NEON_PGDATABASE en GitHub Actions."
+            exit 1
+          fi
+
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
           FILENAME="backup_${TIMESTAMP}.sql"
 
-          pg_dump \
-            --host=ep-bold-haze-anxevkjx-pooler.c-6.us-east-1.aws.neon.tech \
-            --port=5432 \
-            --username=neondb_owner \
-            --dbname=neondb \
-            --no-password \
-            --format=plain \
-            --file="${FILENAME}"
+          if [ -n "$DATABASE_URL" ]; then
+            echo "Usando DATABASE_URL..."
+            pg_dump "$DATABASE_URL" \
+              --format=plain \
+              --no-owner \
+              --no-acl \
+              --file="${FILENAME}"
+          else
+            echo "Usando credenciales NEON_* (host: ${PGHOST})..."
+            export PGSSLMODE=require
+            pg_dump \
+              --format=plain \
+              --no-owner \
+              --no-acl \
+              --file="${FILENAME}"
+          fi
 
-          # Comprimir para ahorrar espacio
           gzip "${FILENAME}"
-          echo "BACKUP_FILE=${FILENAME}.gz" >> $GITHUB_ENV
+          ls -lh "${FILENAME}.gz"
 
       - name: Upload backup as artifact
         uses: actions/upload-artifact@v4
         with:
           name: db-backup-${{ github.run_number }}
           path: "*.sql.gz"
-          # Los artifacts se retienen 90 días por defecto en GitHub
           retention-days: 90

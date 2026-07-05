@@ -530,6 +530,7 @@ model CashShift {
   sales        Sale[]
   cashExpenses CashExpense[]
   salePayments SalePayment[]
+  saleReturns  SaleReturn[]
 
   @@index([tenantId])
   @@index([tenantId, status])
@@ -566,6 +567,7 @@ model Sale {
   details  SaleDetail[]
   payments SalePayment[]
   returns  SaleReturn[]
+  exchangeReturn SaleReturn? @relation("ExchangeReplacementSale")
   receivable  CustomerReceivable?
   afipInvoice AfipInvoice?
 
@@ -702,25 +704,29 @@ model SupplierPayment {
 // =============================================================================
 
 model SaleReturn {
-  id            String         @id @default(cuid())
-  tenantId      String
-  saleId        String
-  type          SaleReturnType
-  reason        String
-  totalAmount   Decimal        @db.Decimal(12, 2) // monto total devuelto
-  processedById String
-  cashShiftId   String?        // si aplica reintegro en efectivo
+  id                String         @id @default(cuid())
+  tenantId          String
+  saleId            String
+  type              SaleReturnType
+  reason            String
+  totalAmount       Decimal        @db.Decimal(12, 2) // monto total devuelto
+  processedById     String
+  cashShiftId       String?        // turno donde se procesó (reintegro o cambio)
+  replacementSaleId String?        @unique // venta de cambio que consumió el crédito
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant      Tenant           @relation(fields: [tenantId], references: [id])
-  sale        Sale             @relation(fields: [saleId], references: [id])
-  processedBy User             @relation(fields: [processedById], references: [id])
-  details     SaleReturnDetail[]
+  tenant          Tenant           @relation(fields: [tenantId], references: [id])
+  sale            Sale             @relation(fields: [saleId], references: [id])
+  processedBy     User             @relation(fields: [processedById], references: [id])
+  cashShift       CashShift?       @relation(fields: [cashShiftId], references: [id])
+  replacementSale Sale?            @relation("ExchangeReplacementSale", fields: [replacementSaleId], references: [id])
+  details         SaleReturnDetail[]
 
   @@index([tenantId])
   @@index([saleId])
+  @@index([cashShiftId])
   @@index([tenantId, createdAt])
 }
 

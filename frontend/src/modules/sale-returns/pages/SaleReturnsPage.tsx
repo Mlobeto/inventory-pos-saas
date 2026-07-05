@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, CheckCircle, AlertCircle, ArrowLeftRight } from 'lucide-react';
 import {
   getSaleReturns,
@@ -49,7 +49,7 @@ function NewReturnWizard({
 }: {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (createdReturn: SaleReturn) => void;
 }) {
   const [step, setStep] = useState<'search' | 'confirm'>('search');
   const [saleNumberInput, setSaleNumberInput] = useState('');
@@ -108,11 +108,11 @@ function NewReturnWizard({
 
   const createMut = useMutation({
     mutationFn: createSaleReturn,
-    onSuccess: () => {
+    onSuccess: (createdReturn) => {
       queryClient.invalidateQueries({ queryKey: ['sale-returns'] });
       queryClient.invalidateQueries({ queryKey: ['sales'] });
       resetWizard();
-      onSuccess();
+      onSuccess(createdReturn);
     },
     onError: (err: unknown) => {
       const msg =
@@ -458,8 +458,8 @@ function NewReturnWizard({
               <ArrowLeftRight className="h-4 w-4 text-blue-500 flex-shrink-0 mt-0.5" />
               <p>
                 Los productos en <strong>buen estado</strong> se reingresarán al stock
-                automáticamente. Luego registrá la nueva venta con los artículos que el cliente
-                lleva.
+                automáticamente. Al confirmar, irás a <strong>Nueva venta</strong> con el crédito
+                aplicado: en caja solo entrará la diferencia que cobres.
               </p>
             </div>
 
@@ -512,6 +512,7 @@ function NewReturnWizard({
 
 // ─── Página principal ─────────────────────────────────────────────────────────
 export default function SaleReturnsPage() {
+  const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
@@ -605,12 +606,15 @@ export default function SaleReturnsPage() {
       <NewReturnWizard
         isOpen={wizardOpen}
         onClose={() => setWizardOpen(false)}
-        onSuccess={() => {
+        onSuccess={(createdReturn) => {
           setWizardOpen(false);
           setSuccessMsg(
-            'Devolución registrada. Los productos en buen estado ya volvieron al stock. Registrá la nueva venta para completar el cambio.',
+            'Devolución registrada. Completá la venta de cambio: el crédito se aplicará automáticamente en caja.',
           );
           setTimeout(() => setSuccessMsg(''), 12000);
+          navigate(ROUTES.SALES_NEW, {
+            state: { exchangeReturnId: createdReturn.id },
+          });
         }}
       />
     </div>

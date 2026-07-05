@@ -13,6 +13,7 @@ export interface ShiftSummary {
   totalExpenses: string;
   calculatedFinal: string;
   calculatedCash: string;
+  exchangeCreditTotal?: string;
   paymentBreakdown: Array<{
     paymentMethodId: string;
     paymentMethodCode: string;

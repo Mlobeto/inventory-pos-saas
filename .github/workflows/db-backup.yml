@@ -1,14 +1,10 @@
 # Backup nocturno de la base Neon.
 #
-# Configurar UNO de estos en GitHub → Settings → Secrets and variables → Actions:
+# Configurar en GitHub → Settings → Secrets and variables → Actions → Secrets
+# (NO en Variables — ahí secrets.DATABASE_URL queda vacío):
 #
-# Opción A (recomendada): secret DATABASE_URL
-#   Copiá la URL COMPLETA desde Neon (incluye usuario:contraseña@host).
-#   Ejemplo: postgresql://USER:PASSWORD@ep-xxx.us-east-1.aws.neon.tech/neondb?sslmode=require
-#   Preferí conexión DIRECTA (host sin "-pooler"). pg_dump no necesita el pooler.
-#
-# Opción B: secrets sueltos
-#   NEON_PGHOST, NEON_PGUSER, NEON_PGPASSWORD, NEON_PGDATABASE
+#   DATABASE_URL = URL completa de Neon, con usuario:contraseña@host
+#   postgresql://USER:PASSWORD@ep-xxx.us-east-1.aws.neon.tech/neondb?sslmode=require
 
 name: DB Backup Nightly
 
@@ -25,13 +21,9 @@ jobs:
       - name: Install postgresql-client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
 
-      - name: Configure database credentials
+      - name: Run pg_dump
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          PGHOST: ${{ secrets.NEON_PGHOST }}
-          PGUSER: ${{ secrets.NEON_PGUSER }}
-          PGPASSWORD: ${{ secrets.NEON_PGPASSWORD }}
-          PGDATABASE: ${{ secrets.NEON_PGDATABASE }}
         run: |
           set -euo pipefail
 
@@ -39,84 +31,71 @@ jobs:
           import os
           import sys
           import urllib.parse
+          from pathlib import Path
 
           def fail(msg: str) -> None:
               print(f"::error::{msg}")
               sys.exit(1)
 
-          def emit(key: str, value: str) -> None:
-              # GitHub Actions multiline env
-              with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
-                  fh.write(f"{key}={value}\n")
-
           database_url = (os.environ.get("DATABASE_URL") or "").strip()
-
-          if database_url:
-              parsed = urllib.parse.urlparse(database_url)
-              if parsed.scheme not in ("postgresql", "postgres"):
-                  fail("DATABASE_URL debe empezar con postgresql://")
-              if not parsed.hostname:
-                  fail("DATABASE_URL no incluye host.")
-              if not parsed.username:
-                  fail("DATABASE_URL no incluye usuario.")
-              if not parsed.password:
-                  fail(
-                      "DATABASE_URL no incluye contraseña. "
-                      "En GitHub → Settings → Secrets → Actions, actualizá DATABASE_URL "
-                      "con la URL completa de Neon (usuario:contraseña@host)."
-                  )
-
-              host = parsed.hostname
-              # pg_dump funciona mejor con endpoint directo, no pooler
-              if "-pooler" in host:
-                  host = host.replace("-pooler", "")
-                  print(f"Nota: usando endpoint directo para pg_dump ({host})")
-
-              database = urllib.parse.unquote((parsed.path or "").lstrip("/")) or "neondb"
-              emit("PGHOST", host)
-              emit("PGUSER", urllib.parse.unquote(parsed.username))
-              emit("PGPASSWORD", urllib.parse.unquote(parsed.password))
-              emit("PGDATABASE", database)
-              emit("PGSSLMODE", "require")
-              print("Credenciales cargadas desde DATABASE_URL.")
-              sys.exit(0)
-
-          required = {
-              "NEON_PGHOST": os.environ.get("PGHOST", "").strip(),
-              "NEON_PGUSER": os.environ.get("PGUSER", "").strip(),
-              "NEON_PGPASSWORD": os.environ.get("PGPASSWORD", "").strip(),
-              "NEON_PGDATABASE": os.environ.get("PGDATABASE", "").strip(),
-          }
-
-          missing = [name for name, value in required.items() if not value]
-          if missing:
+          if not database_url:
               fail(
-                  "Falta configuración de backup. "
-                  "Agregá el secret DATABASE_URL (URL completa con contraseña) "
-                  f"o estos secrets: {', '.join(missing)}"
+                  "Secret DATABASE_URL vacío. "
+                  "Configuralo en Settings → Secrets and variables → Actions → Secrets "
+                  "(pestaña Secrets, NO Variables). "
+                  "Pegá la URL completa: postgresql://usuario:contraseña@host/neondb?sslmode=require"
               )
 
-          host = required["NEON_PGHOST"]
-          if "-pooler" in host:
-              host = host.replace("-pooler", "")
-              print(f"Nota: usando endpoint directo para pg_dump ({host})")
+          parsed = urllib.parse.urlparse(database_url)
+          if parsed.scheme not in ("postgresql", "postgres"):
+              fail("DATABASE_URL debe empezar con postgresql://")
+          if not parsed.hostname:
+              fail("DATABASE_URL no incluye host.")
+          if not parsed.username:
+              fail("DATABASE_URL no incluye usuario.")
+          if not parsed.password:
+              fail(
+                  "DATABASE_URL no incluye contraseña (falta usuario:contraseña@host). "
+                  "Actualizá el secret con la URL completa copiada desde Neon."
+              )
 
-          emit("PGHOST", host)
-          emit("PGUSER", required["NEON_PGUSER"])
-          emit("PGPASSWORD", required["NEON_PGPASSWORD"])
-          emit("PGDATABASE", required["NEON_PGDATABASE"])
-          emit("PGSSLMODE", "require")
-          print("Credenciales cargadas desde secrets NEON_*.")
+          host = parsed.hostname.replace("-pooler", "")
+          port = parsed.port or 5432
+          user = urllib.parse.unquote(parsed.username)
+          password = urllib.parse.unquote(parsed.password)
+          database = urllib.parse.unquote((parsed.path or "").lstrip("/")) or "neondb"
+
+          print(f"Host: {host}")
+          print(f"Usuario: {user}")
+          print(f"Base: {database}")
+          print(f"Contraseña configurada: sí ({len(password)} caracteres)")
+
+          pgpass = Path.home() / ".pgpass"
+          # Escapar ':' y '\' según formato pgpass
+          esc = lambda s: s.replace("\\", "\\\\").replace(":", "\\:")
+          pgpass.write_text(
+              f"{esc(host)}:{port}:{esc(database)}:{esc(user)}:{esc(password)}\n",
+              encoding="utf-8",
+          )
+          pgpass.chmod(0o600)
+
+          env_file = Path("/tmp/pg_backup.env")
+          env_file.write_text(
+              f"PGHOST={host}\nPGPORT={port}\nPGUSER={user}\nPGDATABASE={database}\nPGSSLMODE=require\n",
+              encoding="utf-8",
+          )
+          print("Credenciales listas (~/.pgpass + variables de conexión).")
           PY
 
-      - name: Run pg_dump
-        run: |
-          set -euo pipefail
+          set -a
+          # shellcheck disable=SC1091
+          source /tmp/pg_backup.env
+          set +a
 
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
           FILENAME="backup_${TIMESTAMP}.sql"
 
-          echo "Conectando a ${PGHOST} como ${PGUSER}, base ${PGDATABASE}..."
+          echo "Conectando a ${PGHOST}:${PGPORT} como ${PGUSER}, base ${PGDATABASE}..."
           pg_dump \
             --format=plain \
             --no-owner \

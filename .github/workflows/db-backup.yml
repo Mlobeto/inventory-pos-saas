@@ -26,6 +26,7 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           set -euo pipefail
+          echo "=== Backup workflow v4 (usa secret DATABASE_URL) — commit ${{ github.sha }} ==="
 
           python3 <<'PY'
           import os

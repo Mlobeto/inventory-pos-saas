@@ -6,10 +6,19 @@ import { prisma } from '../../config/database';
 import { successResponse, paginatedResponse } from '../../core/utils/response';
 import { parsePagination, buildPaginationMeta } from '../../core/utils/pagination';
 import { AppError } from '../../core/errors/AppError';
-import { CashShiftStatus } from '@prisma/client';
+import { CashShiftStatus, SaleStatus } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 
 export const cashShiftRouter = Router();
+
+/** Pagos de ventas activas (excluye anuladas) */
+function activeSalePaymentsWhere(cashShiftId: string, tenantId: string) {
+  return {
+    cashShiftId,
+    tenantId,
+    sale: { status: { not: SaleStatus.CANCELLED } },
+  };
+}
 
 cashShiftRouter.use(authMiddleware, tenancyMiddleware);
 
@@ -55,9 +64,11 @@ cashShiftRouter.get('/current', requirePermission('cash-shifts:read'), asyncHand
   }
 
   // Calcular totales del turno en tiempo real
+  const paymentWhere = activeSalePaymentsWhere(shift.id, req.tenantId);
+
   const [salesTotal, expensesTotal, paymentBreakdown, allMethods] = await Promise.all([
     prisma.salePayment.aggregate({
-      where: { cashShiftId: shift.id, tenantId: req.tenantId },
+      where: paymentWhere,
       _sum: { amount: true },
     }),
     prisma.cashExpense.aggregate({
@@ -66,7 +77,7 @@ cashShiftRouter.get('/current', requirePermission('cash-shifts:read'), asyncHand
     }),
     prisma.salePayment.groupBy({
       by: ['paymentMethodId'],
-      where: { cashShiftId: shift.id, tenantId: req.tenantId },
+      where: paymentWhere,
       _sum: { amount: true },
     }),
     prisma.paymentMethod.findMany({
@@ -122,9 +133,11 @@ cashShiftRouter.post('/close', requirePermission('cash-shifts:close'), asyncHand
   if (!shift) throw AppError.shiftNotOpen();
 
   // Calcular monto final
+  const paymentWhere = activeSalePaymentsWhere(shift.id, req.tenantId);
+
   const [salesTotal, expensesTotal, cashPaymentMethod] = await Promise.all([
     prisma.salePayment.aggregate({
-      where: { cashShiftId: shift.id, tenantId: req.tenantId },
+      where: paymentWhere,
       _sum: { amount: true },
     }),
     prisma.cashExpense.aggregate({
@@ -140,7 +153,7 @@ cashShiftRouter.post('/close', requirePermission('cash-shifts:close'), asyncHand
   // Solo pagos en efectivo (CASH) se suman al saldo físico de caja
   const cashSalesTotal = cashPaymentMethod
     ? (await prisma.salePayment.aggregate({
-        where: { cashShiftId: shift.id, tenantId: req.tenantId, paymentMethodId: cashPaymentMethod.id },
+        where: { ...paymentWhere, paymentMethodId: cashPaymentMethod.id },
         _sum: { amount: true },
       }))._sum.amount ?? new Decimal(0)
     : new Decimal(0);
@@ -204,6 +217,7 @@ cashShiftRouter.get('/:id', requirePermission('cash-shifts:read'), asyncHandler(
       },
       cashExpenses: { orderBy: { createdAt: 'asc' } },
       salePayments: {
+        where: { sale: { status: { not: SaleStatus.CANCELLED } } },
         include: { paymentMethod: { select: { code: true, name: true } } },
       },
     },

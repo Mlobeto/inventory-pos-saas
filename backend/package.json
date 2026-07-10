@@ -11,6 +11,7 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "ts-node --project tsconfig.prisma.json prisma/seed.ts",
     "db:test-user": "ts-node --project tsconfig.prisma.json prisma/create-test-user.ts",
+    "db:reset-password": "ts-node --project tsconfig.prisma.json prisma/reset-user-password.ts",
     "db:studio": "prisma studio",
     "db:reset": "prisma migrate reset --force"
   },

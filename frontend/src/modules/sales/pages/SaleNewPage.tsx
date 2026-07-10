@@ -848,9 +848,20 @@ export default function SaleNewPage() {
               {searchResults.length === 0 && !searching ? (
                 <div className="py-10 text-center text-sm text-gray-400">
                   Sin resultados para "{debouncedQuery}"
+                  <p className="text-xs mt-2 text-gray-400">
+                    Probá agregar la talla al final (ej: camiseta entrenamiento niño t 14)
+                  </p>
                 </div>
               ) : (
-                <div className="divide-y divide-gray-100 max-h-80 overflow-y-auto">
+                <>
+                  {searchResults.length > 1 && (
+                    <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 text-xs text-gray-500">
+                      {searchResults.length} resultados
+                      {searchResults.length >= 50 && ' (mostrando los primeros 50)'}
+                      {' — '}escribí la talla al final para filtrar
+                    </div>
+                  )}
+                <div className="divide-y divide-gray-100 max-h-[28rem] overflow-y-auto">
                   {searchResults.map((product) => {
                     const priceEntry = product.productPrices.find(
                       (pp) => pp.paymentMethod.id === priceListId,
@@ -897,6 +908,7 @@ export default function SaleNewPage() {
                     );
                   })}
                 </div>
+                </>
               )}
             </div>
           )}

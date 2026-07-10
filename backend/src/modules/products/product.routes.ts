@@ -13,6 +13,27 @@ export const productRouter = Router();
 
 productRouter.use(authMiddleware, tenancyMiddleware);
 
+const POS_SEARCH_LIMIT = 50;
+
+/** Cada palabra del query debe aparecer en nombre, código interno o código de barras */
+function buildProductTokenSearchWhere(tenantId: string, q: string) {
+  const tokens = q.trim().split(/\s+/).filter(Boolean);
+  const tokenConditions = tokens.map((token) => ({
+    OR: [
+      { name: { contains: token, mode: 'insensitive' as const } },
+      { internalCode: { contains: token, mode: 'insensitive' as const } },
+      { productCodes: { some: { code: { contains: token, mode: 'insensitive' as const } } } },
+    ],
+  }));
+
+  return {
+    tenantId,
+    isActive: true,
+    deletedAt: null,
+    ...(tokenConditions.length > 0 && { AND: tokenConditions }),
+  };
+}
+
 // GET /api/products — listado con búsqueda y filtros
 productRouter.get(
   '/',
@@ -66,17 +87,9 @@ productRouter.get(
     }
 
     const products = await prisma.product.findMany({
-      where: {
-        tenantId: req.tenantId,
-        isActive: true,
-        deletedAt: null,
-        OR: [
-          { name: { contains: q, mode: 'insensitive' } },
-          { internalCode: { contains: q, mode: 'insensitive' } },
-          { productCodes: { some: { code: { contains: q, mode: 'insensitive' } } } },
-        ],
-      },
-      take: 10,
+      where: buildProductTokenSearchWhere(req.tenantId, q),
+      take: POS_SEARCH_LIMIT,
+      orderBy: { name: 'asc' },
       include: {
         productCodes: true,
         productPrices: { include: { paymentMethod: { select: { id: true, code: true, name: true } } } },

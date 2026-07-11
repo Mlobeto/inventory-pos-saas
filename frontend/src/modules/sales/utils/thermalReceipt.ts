@@ -28,7 +28,7 @@ export function printThermalReceipt({ sale, cashierName, discountAmount = 0 }: R
     .map(
       (item) => `
       <tr>
-        <td class="td-name">${item.product.name}<br/><span class="code">${item.product.internalCode}</span></td>
+        <td class="td-name">${item.customName ?? item.product.name}<br/><span class="code">${item.customName ? 'Ítem ocasional' : item.product.internalCode}</span></td>
         <td class="td-qty">${item.quantity}</td>
         <td class="td-price">${fmtAR(parseFloat(item.subtotal))}</td>
       </tr>`,

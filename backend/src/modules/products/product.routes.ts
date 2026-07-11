@@ -30,6 +30,7 @@ function buildProductTokenSearchWhere(tenantId: string, q: string) {
     tenantId,
     isActive: true,
     deletedAt: null,
+    internalCode: { not: 'MISC' },
     ...(tokenConditions.length > 0 && { AND: tokenConditions }),
   };
 }
@@ -46,6 +47,7 @@ productRouter.get(
     const where = {
       tenantId: req.tenantId,
       deletedAt: null,
+      internalCode: { not: 'MISC' },
       isActive: req.query.inactive ? undefined : true,
       ...(type && { type }),
       ...(search && {
@@ -97,6 +99,33 @@ productRouter.get(
     });
 
     res.json(successResponse(products));
+  }),
+);
+
+// GET /api/products/misc-item — producto contenedor para ítems ocasionales (sin stock)
+productRouter.get(
+  '/misc-item',
+  requirePermission('products:read'),
+  asyncHandler(async (req, res) => {
+    let product = await prisma.product.findFirst({
+      where: { tenantId: req.tenantId, internalCode: 'MISC', deletedAt: null },
+    });
+
+    if (!product) {
+      product = await prisma.product.create({
+        data: {
+          tenantId: req.tenantId,
+          internalCode: 'MISC',
+          name: 'Ítem ocasional',
+          type: ProductType.PERSONALIZADO,
+          tracksStock: false,
+          currentStock: 0,
+          isActive: true,
+        },
+      });
+    }
+
+    res.json(successResponse(product));
   }),
 );
 

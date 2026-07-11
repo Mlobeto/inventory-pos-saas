@@ -295,6 +295,7 @@ model Product {
   unit         String      @default("UN") // UN, KG, L, etc.
   currentStock Int         @default(0)    // denormalizado para rendimiento; siempre actualizar via tx
   minStock     Int         @default(0)    // stock mínimo para alertas
+  tracksStock  Boolean     @default(true) // false = ítem ocasional / servicio, no descuenta stock
   isActive     Boolean     @default(true)
 
   createdAt DateTime  @default(now())
@@ -590,6 +591,7 @@ model SaleDetail {
   discountAmount      Decimal @db.Decimal(12, 2) @default(0)
   subtotal            Decimal @db.Decimal(12, 2)
   appliedPriceListCode String  // código de la lista de precios aplicada (snapshot)
+  customName          String? // nombre libre para ítems ocasionales (sin producto de catálogo)
 
   sale    Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id])

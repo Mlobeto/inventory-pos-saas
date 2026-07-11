@@ -49,6 +49,7 @@ export interface SaleItemInput {
   unitCost: number;
   discountAmount?: number;
   appliedPriceListCode: string;
+  customName?: string;
 }
 
 export interface SalePaymentInput {
@@ -69,6 +70,7 @@ export interface CreateSaleDto {
 export interface SaleDetailItem {
   id: string;
   product: { id: string; name: string; internalCode: string };
+  customName?: string | null;
   quantity: number;
   unitPrice: string;
   unitCost: string;

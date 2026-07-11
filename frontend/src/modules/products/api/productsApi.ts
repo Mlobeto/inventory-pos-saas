@@ -54,6 +54,11 @@ export async function searchProducts(q: string): Promise<Product[]> {
   return res.data.data;
 }
 
+export async function getMiscItemProduct(): Promise<Product> {
+  const res = await apiClient.get('/api/products/misc-item');
+  return res.data.data;
+}
+
 export async function getProduct(id: string): Promise<Product> {
   const res = await apiClient.get(`/api/products/${id}`);
   return res.data.data;

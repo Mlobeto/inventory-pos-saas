@@ -3,10 +3,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import {
   Search, Plus, Minus, Trash2, CheckCircle, AlertCircle,
-  ShoppingCart, Clock, ChevronDown, Printer, UserRound, X, UserPlus, ArrowLeftRight,
+  ShoppingCart, Clock, ChevronDown, Printer, UserRound, X, UserPlus, ArrowLeftRight, Tag,
 } from 'lucide-react';
 import { createSale, type Sale } from '../api/salesApi';
-import { searchProducts, type Product } from '@/modules/products/api/productsApi';
+import { searchProducts, getMiscItemProduct, type Product } from '@/modules/products/api/productsApi';
 import { searchCustomers, createCustomer, CUSTOMER_TYPE_LABELS, type Customer as CustomerRecord, type CustomerType, type CreateCustomerDto } from '@/modules/customers/api/customersApi';
 import {
   getPaymentMethods,
@@ -22,6 +22,7 @@ import { ROUTES } from '@/router/routes';
 
 // ─── Tipos internos ───────────────────────────────────────────────────────────
 interface CartItem {
+  cartKey: string;
   productId: string;
   internalCode: string;
   name: string;
@@ -30,6 +31,9 @@ interface CartItem {
   quantity: number;
   productPrices: Array<{ paymentMethodId: string; price: string }>;
   lineDiscount: number;
+  isMisc?: boolean;
+  customName?: string;
+  customUnitPrice?: number;
 }
 
 interface PaymentRow {
@@ -45,8 +49,13 @@ function fmt(n: number): string {
 }
 
 function getPrice(item: CartItem, priceListId: string): number {
+  if (item.isMisc && item.customUnitPrice != null) return item.customUnitPrice;
   const pp = item.productPrices.find((p) => p.paymentMethodId === priceListId);
   return pp ? parseFloat(pp.price) : 0;
+}
+
+function itemDisplayName(item: CartItem): string {
+  return item.customName ?? item.name;
 }
 
 let rowSeq = 0;
@@ -166,6 +175,11 @@ export default function SaleNewPage() {
   // Búsqueda de productos
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [miscModalOpen, setMiscModalOpen] = useState(false);
+  const [miscName, setMiscName] = useState('');
+  const [miscPrice, setMiscPrice] = useState('');
+  const [miscQty, setMiscQty] = useState('1');
+  const [miscError, setMiscError] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
   const methodsInitialized = useRef(false);
   const skipPaymentReset = useRef(false);
@@ -219,6 +233,13 @@ export default function SaleNewPage() {
     queryFn: () => searchProducts(debouncedQuery),
     enabled: debouncedQuery.length >= 2,
     staleTime: 10_000,
+  });
+
+  const { data: miscProduct } = useQuery({
+    queryKey: ['misc-product'],
+    queryFn: getMiscItemProduct,
+    enabled: !!currentShift,
+    staleTime: 60_000,
   });
 
   // Métodos de pago disponibles para cobrar (no son listas de precio, salvo CASH; excluir EXCHANGE_CREDIT del selector normal)
@@ -370,7 +391,7 @@ export default function SaleNewPage() {
 
   function addToCart(product: Product) {
     setCart((prev) => {
-      const idx = prev.findIndex((i) => i.productId === product.id);
+      const idx = prev.findIndex((i) => !i.isMisc && i.productId === product.id);
       if (idx >= 0) {
         return prev.map((item, i) =>
           i === idx ? { ...item, quantity: item.quantity + 1 } : item,
@@ -379,6 +400,7 @@ export default function SaleNewPage() {
       return [
         ...prev,
         {
+          cartKey: product.id,
           productId: product.id,
           internalCode: product.internalCode,
           name: product.name,
@@ -398,15 +420,59 @@ export default function SaleNewPage() {
     searchRef.current?.focus();
   }
 
-  function updateQty(productId: string, qty: number) {
-    if (qty <= 0) { removeFromCart(productId); return; }
+  function addMiscToCart() {
+    setMiscError('');
+    const name = miscName.trim();
+    const price = parseFloat(miscPrice);
+    const qty = parseInt(miscQty, 10) || 1;
+
+    if (!name) {
+      setMiscError('Ingresá un nombre');
+      return;
+    }
+    if (!price || price <= 0) {
+      setMiscError('Ingresá un precio mayor a 0');
+      return;
+    }
+    if (!miscProduct) {
+      setMiscError('No se pudo cargar el ítem ocasional');
+      return;
+    }
+
+    setCart((prev) => [
+      ...prev,
+      {
+        cartKey: `misc-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        productId: miscProduct.id,
+        internalCode: 'OCASIONAL',
+        name: miscProduct.name,
+        customName: name,
+        unit: miscProduct.unit,
+        currentStock: 999,
+        quantity: qty,
+        productPrices: [],
+        lineDiscount: 0,
+        isMisc: true,
+        customUnitPrice: price,
+      },
+    ]);
+
+    setMiscModalOpen(false);
+    setMiscName('');
+    setMiscPrice('');
+    setMiscQty('1');
+    setFormError('');
+  }
+
+  function updateQty(cartKey: string, qty: number) {
+    if (qty <= 0) { removeFromCart(cartKey); return; }
     setCart((prev) =>
-      prev.map((i) => (i.productId === productId ? { ...i, quantity: qty } : i)),
+      prev.map((i) => (i.cartKey === cartKey ? { ...i, quantity: qty } : i)),
     );
   }
 
-  function removeFromCart(productId: string) {
-    setCart((prev) => prev.filter((i) => i.productId !== productId));
+  function removeFromCart(cartKey: string) {
+    setCart((prev) => prev.filter((i) => i.cartKey !== cartKey));
   }
 
   // ─── Acciones de pago ─────────────────────────────────────────────────────────
@@ -460,7 +526,7 @@ export default function SaleNewPage() {
     if (!priceListId) { setFormError('Seleccioná una lista de precios'); return; }
     if (cart.length === 0) { setFormError('Agregá al menos un producto al carrito'); return; }
 
-    const hasNoPrice = cart.some((item) => getPrice(item, priceListId) === 0);
+    const hasNoPrice = cart.some((item) => !item.isMisc && getPrice(item, priceListId) === 0);
     if (hasNoPrice) {
       setFormError('Algunos productos no tienen precio para la lista seleccionada');
       return;
@@ -519,7 +585,8 @@ export default function SaleNewPage() {
         unitPrice: getPrice(item, priceListId),
         unitCost: 0,
         discountAmount: item.lineDiscount || undefined,
-        appliedPriceListCode: priceListCode,
+        appliedPriceListCode: item.isMisc ? 'MISC' : priceListCode,
+        ...(item.isMisc && item.customName && { customName: item.customName }),
       })),
       payments: validPayments.map((p) => ({
         paymentMethodId: p.methodId,
@@ -816,7 +883,8 @@ export default function SaleNewPage() {
         {/* ─── Columna izquierda: búsqueda ─── */}
         <div className="flex-1 min-w-0 space-y-3">
           {/* Campo de búsqueda */}
-          <div className="relative">
+          <div className="flex gap-2">
+          <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
             <input
               ref={searchRef}
@@ -841,6 +909,91 @@ export default function SaleNewPage() {
               <div className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-brand-400 border-t-transparent rounded-full animate-spin" />
             )}
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              setMiscModalOpen(true);
+              setMiscError('');
+            }}
+            className="flex items-center gap-1.5 px-3 py-3 border border-dashed border-brand-300 rounded-xl text-sm font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 transition-colors whitespace-nowrap"
+            title="Vender algo puntual sin stock"
+          >
+            <Tag className="h-4 w-4" />
+            <span className="hidden sm:inline">Ítem ocasional</span>
+          </button>
+          </div>
+
+          {/* Modal ítem ocasional */}
+          {miscModalOpen && (
+            <div className="bg-white rounded-xl border border-brand-200 shadow-sm p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-gray-800">Ítem ocasional</p>
+                <button
+                  type="button"
+                  onClick={() => setMiscModalOpen(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <p className="text-xs text-gray-500">
+                Para ventas puntuales: no descuenta stock ni queda en el catálogo.
+              </p>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Nombre / descripción *</label>
+                <input
+                  autoFocus
+                  type="text"
+                  value={miscName}
+                  onChange={(e) => setMiscName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') addMiscToCart(); }}
+                  placeholder="Ej: Arreglo de camiseta, envío, etc."
+                  className="w-full border border-gray-300 rounded-md px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Precio *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={miscPrice}
+                    onChange={(e) => setMiscPrice(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full border border-gray-300 rounded-md px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Cantidad</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={miscQty}
+                    onChange={(e) => setMiscQty(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+              </div>
+              {miscError && <p className="text-xs text-red-600">{miscError}</p>}
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMiscModalOpen(false)}
+                  className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 rounded-md"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={addMiscToCart}
+                  className="px-3 py-1.5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-md"
+                >
+                  Agregar al carrito
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Resultados de búsqueda */}
           {debouncedQuery.length >= 2 && (
@@ -943,10 +1096,10 @@ export default function SaleNewPage() {
                 {cart.map((item) => {
                   const unitPrice = getPrice(item, priceListId);
                   const lineTotal = unitPrice * item.quantity - item.lineDiscount;
-                  const noPrice = unitPrice === 0 && priceListId;
+                  const noPrice = !item.isMisc && unitPrice === 0 && priceListId;
 
                   return (
-                    <div key={item.productId} className="px-4 py-3">
+                    <div key={item.cartKey} className="px-4 py-3">
                       <div className="flex justify-between items-start mb-2">
                         <div className="flex-1 pr-2 min-w-0">
                           <p
@@ -954,13 +1107,15 @@ export default function SaleNewPage() {
                               noPrice ? 'text-red-500' : 'text-gray-900'
                             }`}
                           >
-                            {item.name}
+                            {itemDisplayName(item)}
                           </p>
-                          <p className="text-xs text-gray-400">{item.internalCode}</p>
+                          <p className="text-xs text-gray-400">
+                            {item.isMisc ? 'Ítem ocasional' : item.internalCode}
+                          </p>
                         </div>
                         <button
                           type="button"
-                          onClick={() => removeFromCart(item.productId)}
+                          onClick={() => removeFromCart(item.cartKey)}
                           className="text-gray-300 hover:text-red-500 transition-colors flex-shrink-0"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -972,7 +1127,7 @@ export default function SaleNewPage() {
                         <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden">
                           <button
                             type="button"
-                            onClick={() => updateQty(item.productId, item.quantity - 1)}
+                            onClick={() => updateQty(item.cartKey, item.quantity - 1)}
                             className="px-2 py-1.5 hover:bg-gray-50 text-gray-500"
                           >
                             <Minus className="h-3 w-3" />
@@ -982,13 +1137,13 @@ export default function SaleNewPage() {
                             min="1"
                             value={item.quantity}
                             onChange={(e) =>
-                              updateQty(item.productId, parseInt(e.target.value) || 1)
+                              updateQty(item.cartKey, parseInt(e.target.value) || 1)
                             }
                             className="w-10 text-center text-sm border-x border-gray-200 py-1.5 focus:outline-none"
                           />
                           <button
                             type="button"
-                            onClick={() => updateQty(item.productId, item.quantity + 1)}
+                            onClick={() => updateQty(item.cartKey, item.quantity + 1)}
                             className="px-2 py-1.5 hover:bg-gray-50 text-gray-500"
                           >
                             <Plus className="h-3 w-3" />

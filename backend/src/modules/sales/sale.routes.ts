@@ -126,6 +126,7 @@ saleRouter.post('/', requirePermission('sales:create'), asyncHandler(async (req,
       unitCost: number;
       discountAmount?: number;
       appliedPriceListCode: string;
+      customName?: string;
     }>;
     payments: Array<{
       paymentMethodId: string;
@@ -234,6 +235,7 @@ saleRouter.post('/', requirePermission('sales:create'), asyncHandler(async (req,
             discountAmount: new Decimal(i.discountAmount ?? 0),
             subtotal: new Decimal(i.quantity * i.unitPrice - (i.discountAmount ?? 0)),
             appliedPriceListCode: i.appliedPriceListCode,
+            ...(i.customName?.trim() && { customName: i.customName.trim() }),
           })),
         },
       },
@@ -278,13 +280,15 @@ saleRouter.post('/', requirePermission('sales:create'), asyncHandler(async (req,
       });
     }
 
-    // Descontar stock y crear StockMovements
+    // Descontar stock y crear StockMovements (solo productos con tracksStock)
     for (const item of items) {
       const product = await tx.product.findUnique({
         where: { id: item.productId },
-        select: { currentStock: true, internalCode: true },
+        select: { currentStock: true, internalCode: true, tracksStock: true },
       });
       if (!product) throw AppError.notFound(`Producto ${item.productId}`);
+      if (!product.tracksStock) continue;
+
       if (product.currentStock < item.quantity) {
         throw AppError.insufficientStock(product.internalCode);
       }
@@ -342,13 +346,13 @@ saleRouter.post('/:id/cancel', requirePermission('sales:cancel'), asyncHandler(a
   }
 
   await prisma.$transaction(async (tx) => {
-    // Reintegrar stock
+    // Reintegrar stock (solo productos con tracksStock)
     for (const detail of sale.details) {
       const product = await tx.product.findUnique({
         where: { id: detail.productId },
-        select: { currentStock: true },
+        select: { currentStock: true, tracksStock: true },
       });
-      if (!product) continue;
+      if (!product || !product.tracksStock) continue;
       const stockAfter = product.currentStock + detail.quantity;
       await tx.product.update({ where: { id: detail.productId }, data: { currentStock: stockAfter } });
       await tx.stockMovement.create({

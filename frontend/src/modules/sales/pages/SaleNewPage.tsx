@@ -383,7 +383,20 @@ export default function SaleNewPage() {
     : parseFloat(exchangeCredit) || 0;
   const totalPaid = payments.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0) + exchangeCreditAmount;
   const remaining = totalAmount - totalPaid;
-  const hasChange = totalPaid > totalAmount + 0.005;
+  const isSingleCreditAccountPayment =
+    payments.length === 1 &&
+    paymentMethods.find((m) => m.id === payments[0]?.methodId)?.code === 'CREDIT_ACCOUNT';
+
+  // Cuenta corriente al 100%: el monto debe seguir al total (sin cambio ni sobrepago)
+  useEffect(() => {
+    if (!isSingleCreditAccountPayment || cart.length === 0) return;
+
+    const targetStr = Math.max(0, totalAmount - exchangeCreditAmount).toFixed(2);
+    setPayments((prev) => {
+      if (prev.length !== 1 || prev[0].amount === targetStr) return prev;
+      return [{ ...prev[0], amount: targetStr }];
+    });
+  }, [totalAmount, exchangeCreditAmount, isSingleCreditAccountPayment, cart.length]);
 
   // ─── Acciones del carrito ─────────────────────────────────────────────────────
   // Mantener ref actualizada para evitar stale closure en effects
@@ -535,8 +548,14 @@ export default function SaleNewPage() {
     // CREDIT_ACCOUNT sin monto se completa automáticamente con el total pendiente
     const paymentsToValidate = payments.map((p) => {
       const pm = paymentMethods.find((m) => m.id === p.methodId);
+      if (pm?.code === 'CREDIT_ACCOUNT' && payments.length === 1) {
+        return { ...p, amount: String(Math.max(0, totalAmount - exchangeCreditAmount)) };
+      }
       if (pm?.code === 'CREDIT_ACCOUNT' && (!p.amount || parseFloat(p.amount) === 0)) {
-        return { ...p, amount: String(remaining > 0 ? remaining : totalAmount) };
+        const othersPaid = payments
+          .filter((x) => x.rowId !== p.rowId)
+          .reduce((a, x) => a + (parseFloat(x.amount) || 0), 0);
+        return { ...p, amount: String(Math.max(0, totalAmount - exchangeCreditAmount - othersPaid)) };
       }
       return p;
     });
@@ -1224,24 +1243,27 @@ export default function SaleNewPage() {
                       onChange={(e) => {
                         updatePayment(row.rowId, 'methodId', e.target.value);
                         const selectedMethod = paymentMethods.find((m) => m.id === e.target.value);
-                        // Si es Cuenta Corriente, auto-llenar con el saldo pendiente
-                        if (selectedMethod?.code === 'CREDIT_ACCOUNT' && !row.amount && remaining > 0.005) {
-                          fillRemaining(row.rowId);
-                        }
                         // Sincronizar lista de precios según método de pago (solo primera fila)
                         const isFirstRow = payments[0]?.rowId === row.rowId;
                         if (isFirstRow && priceTierMethods.length > 0) {
-                          const tierCode =
-                            selectedMethod?.code === 'CASH' ? 'CASH'
-                            : selectedMethod?.code === 'CREDIT_ACCOUNT' ? 'VENDEDOR'
-                            : 'PUBLIC';
-                          const tier =
-                            priceTierMethods.find((m) => m.code === tierCode) ??
-                            priceTierMethods.find((m) => m.code === 'PUBLIC') ??
-                            priceTierMethods[0];
-                          if (tier && tier.id !== priceListId) {
-                            skipPaymentReset.current = true;
-                            setPriceListId(tier.id);
+                          let tierCode: string | null = null;
+                          if (selectedMethod?.code === 'CASH') {
+                            tierCode = 'CASH';
+                          } else if (
+                            selectedMethod?.code === 'CREDIT_ACCOUNT' &&
+                            selectedCustomer?.type === 'VENDEDOR'
+                          ) {
+                            tierCode = 'VENDEDOR';
+                          }
+                          if (tierCode) {
+                            const tier =
+                              priceTierMethods.find((m) => m.code === tierCode) ??
+                              priceTierMethods.find((m) => m.code === 'PUBLIC') ??
+                              priceTierMethods[0];
+                            if (tier && tier.id !== priceListId) {
+                              skipPaymentReset.current = true;
+                              setPriceListId(tier.id);
+                            }
                           }
                         }
                       }}
@@ -1266,10 +1288,13 @@ export default function SaleNewPage() {
                         value={row.amount}
                         onChange={(e) => updatePayment(row.rowId, 'amount', e.target.value)}
                         onFocus={() => {
+                          const pm = paymentMethods.find((m) => m.id === row.methodId);
+                          if (pm?.code === 'CREDIT_ACCOUNT' && payments.length === 1) return;
                           if (!row.amount && remaining > 0.005) fillRemaining(row.rowId);
                         }}
+                        readOnly={isSingleCreditAccountPayment}
                         placeholder="0"
-                        className="w-full pl-5 pr-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        className={`w-full pl-5 pr-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 ${isSingleCreditAccountPayment ? 'bg-gray-50 text-gray-700' : ''}`}
                       />
                     </div>
 
@@ -1333,10 +1358,15 @@ export default function SaleNewPage() {
                     }`}
                   >
                     <span>
-                      {Math.abs(remaining) < 0.01 ? '✓ Listo' : remaining > 0 ? 'Pendiente' : 'Cambio'}
+                      {Math.abs(remaining) < 0.01
+                        ? '✓ Listo'
+                        : remaining > 0
+                        ? 'Pendiente'
+                        : isSingleCreditAccountPayment
+                        ? 'Revisá el monto'
+                        : 'Cambio'}
                     </span>
                     {Math.abs(remaining) > 0.01 && <span>{fmt(Math.abs(remaining))}</span>}
-                    {hasChange && <span>{fmt(Math.abs(remaining))}</span>}
                   </div>
                 )}
               </div>

@@ -120,7 +120,7 @@ customerReceivablesRouter.get(
 // Registrar un cobro sobre una o varias cuentas pendientes
 customerReceivablesRouter.post(
   '/:id/payments',
-  requirePermission('customers:write'),
+  requirePermission('customers:write', 'customers:collect'),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const { receivableId, amount, paymentMethod, reference, notes } = req.body as {

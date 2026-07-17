@@ -49,7 +49,11 @@ function fmt(amount: string | number) {
 export default function CustomersPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const canRead = useAuthStore((s) => s.hasPermission('customers:read'));
   const canWrite = useAuthStore((s) => s.hasPermission('customers:write'));
+  const canCollect = useAuthStore(
+    (s) => s.hasPermission('customers:collect') || s.hasPermission('customers:write'),
+  );
 
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -286,7 +290,7 @@ export default function CustomersPage() {
                 ? `$${parseFloat(r.creditLimit).toLocaleString('es-AR')}`
                 : '—',
           },
-          ...(canWrite
+          ...(canRead
             ? [
                 {
                   key: 'actions' as const,
@@ -303,31 +307,37 @@ export default function CustomersPage() {
                       >
                         Ver cuenta
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        leftIcon={<CreditCard className="h-3.5 w-3.5" />}
-                        onClick={() => openCobro(r)}
-                      >
-                        Cobrar
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        leftIcon={<Edit2 className="h-3.5 w-3.5" />}
-                        onClick={() => openEdit(r)}
-                      >
-                        Editar
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-red-600 hover:text-red-700"
-                        leftIcon={<Trash2 className="h-3.5 w-3.5" />}
-                        onClick={() => setDeleteTarget(r)}
-                      >
-                        Eliminar
-                      </Button>
+                      {canCollect && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          leftIcon={<CreditCard className="h-3.5 w-3.5" />}
+                          onClick={() => openCobro(r)}
+                        >
+                          Cobrar
+                        </Button>
+                      )}
+                      {canWrite && (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            leftIcon={<Edit2 className="h-3.5 w-3.5" />}
+                            onClick={() => openEdit(r)}
+                          >
+                            Editar
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-red-600 hover:text-red-700"
+                            leftIcon={<Trash2 className="h-3.5 w-3.5" />}
+                            onClick={() => setDeleteTarget(r)}
+                          >
+                            Eliminar
+                          </Button>
+                        </>
+                      )}
                     </div>
                   ),
                 },

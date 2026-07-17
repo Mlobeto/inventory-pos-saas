@@ -61,10 +61,13 @@ export default function PurchaseNewPage() {
   const [newProdPrices, setNewProdPrices] = useState<Record<string, number>>({});
   const [newProdMarkup, setNewProdMarkup] = useState(0);
   const productTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const [isSaving, setIsSaving] = useState(false);
+  const savingRef = useRef(false);
 
   const {
     register,
     handleSubmit,
+    reset,
   } = useForm<PurchaseFormValues>();
 
   const {
@@ -308,9 +311,21 @@ export default function PurchaseNewPage() {
 
   const subtotal = items.reduce((acc, i) => acc + i.quantityOrdered * i.unitCost, 0);
 
-  function onSubmit(values: PurchaseFormValues) {
+  function resetPurchaseForm() {
+    reset({ invoiceNumber: '', invoiceDate: '', notes: '' });
+    setItems([]);
+    clearSupplier();
+    setProductSearch('');
+    setSearchResults([]);
+    setShowDropdown(false);
+    setSupplierError('');
+  }
+
+  async function onSubmit(values: PurchaseFormValues) {
+    if (savingRef.current) return;
     if (!selectedSupplier) { setSupplierError('Seleccioná o creá un proveedor'); return; }
     if (items.length === 0) return;
+
     const dto: CreatePurchaseDto = {
       supplierId: selectedSupplier.id,
       invoiceNumber: values.invoiceNumber || undefined,
@@ -318,23 +333,29 @@ export default function PurchaseNewPage() {
       notes: values.notes || undefined,
       items: items.map((i) => ({ productId: i.productId, quantityOrdered: i.quantityOrdered, unitCost: i.unitCost })),
     };
-    createMut.mutate(dto, {
-      onSuccess: async (data) => {
-        // Guardar precios de cada producto
-        await Promise.all(
-          items.map((item) =>
-            upsertProductPrices(
-              item.productId,
-              Object.entries(item.prices)
-                .filter(([, price]) => price > 0)
-                .map(([methodId, price]) => ({ paymentMethodId: methodId, price })),
-            ),
+
+    const itemsSnapshot = [...items];
+    savingRef.current = true;
+    setIsSaving(true);
+    try {
+      const data = await createMut.mutateAsync(dto);
+      await Promise.all(
+        itemsSnapshot.map((item) =>
+          upsertProductPrices(
+            item.productId,
+            Object.entries(item.prices)
+              .filter(([, price]) => price > 0)
+              .map(([methodId, price]) => ({ paymentMethodId: methodId, price })),
           ),
-        );
-        queryClient.invalidateQueries({ queryKey: ['purchases'] });
-        navigate(ROUTES.PURCHASES_DETAIL.replace(':id', data.id));
-      },
-    });
+        ),
+      );
+      queryClient.invalidateQueries({ queryKey: ['purchases'] });
+      resetPurchaseForm();
+      navigate(ROUTES.PURCHASES_DETAIL.replace(':id', data.id));
+    } finally {
+      savingRef.current = false;
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -583,7 +604,12 @@ export default function PurchaseNewPage() {
         </div>
 
         <div className="flex justify-end gap-3">
-          <Button type="submit" isLoading={createMut.isPending} disabled={items.length === 0} leftIcon={<Plus className="h-4 w-4" />}>
+          <Button
+            type="submit"
+            isLoading={isSaving}
+            disabled={items.length === 0 || isSaving}
+            leftIcon={<Plus className="h-4 w-4" />}
+          >
             Guardar factura de compra
           </Button>
         </div>

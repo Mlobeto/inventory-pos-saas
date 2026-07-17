@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useRef, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CreditCard, Receipt, CheckCircle, Clock, AlertCircle } from 'lucide-react';
@@ -30,32 +31,89 @@ function fmt(amount: string | number) {
 
 function ProductTooltip({ details }: { details: CustomerReceivable['sale']['details'] }) {
   const [show, setShow] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, left: 0, placement: 'top' as 'top' | 'bottom' });
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!show || !triggerRef.current) return;
+
+    function updatePosition() {
+      const trigger = triggerRef.current;
+      const tooltip = tooltipRef.current;
+      if (!trigger) return;
+
+      const rect = trigger.getBoundingClientRect();
+      const tooltipHeight = tooltip?.offsetHeight ?? 0;
+      const tooltipWidth = tooltip?.offsetWidth ?? 288;
+      const gap = 8;
+      const padding = 8;
+
+      const showBelow = tooltipHeight > 0 && rect.top - padding < tooltipHeight + gap;
+
+      let left = rect.left;
+      if (left + tooltipWidth > window.innerWidth - padding) {
+        left = window.innerWidth - tooltipWidth - padding;
+      }
+      left = Math.max(padding, left);
+
+      if (showBelow) {
+        setCoords({ top: rect.bottom + gap, left, placement: 'bottom' });
+      } else {
+        setCoords({ top: rect.top - gap, left, placement: 'top' });
+      }
+    }
+
+    updatePosition();
+    window.addEventListener('scroll', updatePosition, true);
+    window.addEventListener('resize', updatePosition);
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [show, details]);
+
   if (!details || details.length === 0) return null;
+
+  const tooltip = show ? (
+    <div
+      ref={tooltipRef}
+      style={{
+        top: coords.top,
+        left: coords.left,
+        transform: coords.placement === 'top' ? 'translateY(-100%)' : undefined,
+      }}
+      className="fixed z-[100] w-72 max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg p-3"
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+    >
+      <p className="text-xs font-semibold text-gray-700 mb-2">Productos incluidos</p>
+      <ul className="space-y-1">
+        {details.map((d, i) => (
+          <li key={i} className="flex justify-between text-xs text-gray-600">
+            <span className="truncate max-w-[160px]">
+              {d.quantity}x {d.product.name}
+            </span>
+            <span className="font-medium ml-2">{fmt(d.subtotal)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  ) : null;
+
   return (
-    <div className="relative inline-block">
+    <>
       <button
+        ref={triggerRef}
+        type="button"
         onMouseEnter={() => setShow(true)}
         onMouseLeave={() => setShow(false)}
         className="text-brand-600 underline text-xs cursor-pointer"
       >
         ver productos
       </button>
-      {show && (
-        <div className="absolute z-50 bottom-full left-0 mb-1 w-72 bg-white border border-gray-200 rounded-lg shadow-lg p-3">
-          <p className="text-xs font-semibold text-gray-700 mb-2">Productos incluidos</p>
-          <ul className="space-y-1">
-            {details.map((d, i) => (
-              <li key={i} className="flex justify-between text-xs text-gray-600">
-                <span className="truncate max-w-[160px]">
-                  {d.quantity}x {d.product.name}
-                </span>
-                <span className="font-medium ml-2">{fmt(d.subtotal)}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
+      {tooltip && createPortal(tooltip, document.body)}
+    </>
   );
 }
 
@@ -170,7 +228,9 @@ function PayModal({ customerId, receivable, onClose }: PayModalProps) {
 
 export default function CustomerStatementPage() {
   const { id } = useParams<{ id: string }>();
-  const canWrite = useAuthStore((s) => s.hasPermission('customers:write'));
+  const canCollect = useAuthStore(
+    (s) => s.hasPermission('customers:collect') || s.hasPermission('customers:write'),
+  );
   const [payTarget, setPayTarget] = useState<CustomerReceivable | null>(null);
 
   const { data, isLoading, error } = useQuery({
@@ -335,7 +395,7 @@ export default function CustomerStatementPage() {
                 )}
 
                 {/* Actions */}
-                {canWrite && r.status !== 'PAID' && (
+                {canCollect && r.status !== 'PAID' && (
                   <div className="border-t border-gray-100 px-4 py-2 flex justify-end">
                     <Button
                       size="sm"

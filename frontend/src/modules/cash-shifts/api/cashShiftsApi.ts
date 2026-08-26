@@ -16,6 +16,8 @@ export interface ShiftSummary {
   calculatedFinal: string;
   calculatedCash: string;
   exchangeCreditTotal?: string;
+  accountCollections?: string;
+  accountCollectionsCash?: string;
   paymentBreakdown: PaymentBreakdownItem[];
 }
 
@@ -66,6 +68,14 @@ export interface ShiftDetail extends CashShift {
     reason: string;
     createdAt: string;
     sale: { saleNumber: string };
+  }>;
+  customerPayments: Array<{
+    id: string;
+    amount: string;
+    paymentMethod: string;
+    paidAt: string;
+    receivableId: string | null;
+    customer: { name: string };
   }>;
 }
 

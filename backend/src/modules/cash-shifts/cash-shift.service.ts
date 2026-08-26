@@ -20,6 +20,10 @@ export interface ShiftTotals {
   /** Reintegros de dinero por devoluciones procesadas en el turno */
   totalRefunds: Decimal;
   exchangeCreditTotal: Decimal;
+  /** Cobros de cuenta corriente registrados en el turno */
+  accountCollections: Decimal;
+  /** Cobros de cuenta corriente que entraron en efectivo */
+  accountCollectionsCash: Decimal;
   /** Efectivo físico esperado en caja */
   calculatedCash: Decimal;
   /** Apertura + todos los cobros - gastos - reintegros (incluye métodos que no son efectivo) */
@@ -48,7 +52,7 @@ export async function computeShiftTotals(
     sale: { status: { not: SaleStatus.CANCELLED } },
   };
 
-  const [paymentGroups, expensesAgg, refundsAgg, methods] = await Promise.all([
+  const [paymentGroups, expensesAgg, refundsAgg, accountPayments, methods] = await Promise.all([
     db.salePayment.groupBy({
       by: ['paymentMethodId'],
       where: paymentWhere,
@@ -61,6 +65,10 @@ export async function computeShiftTotals(
     db.saleReturn.aggregate({
       where: { cashShiftId: shiftId, tenantId, type: SaleReturnType.REFUND },
       _sum: { totalAmount: true },
+    }),
+    db.customerPayment.findMany({
+      where: { cashShiftId: shiftId, tenantId },
+      select: { amount: true, paymentMethodId: true, paymentMethod: true },
     }),
     db.paymentMethod.findMany({
       where: { tenantId },
@@ -91,9 +99,31 @@ export async function computeShiftTotals(
   const totalExpenses = expensesAgg._sum.amount ?? new Decimal(0);
   const totalRefunds = refundsAgg._sum.totalAmount ?? new Decimal(0);
 
+  // Cobros de cuenta corriente: solo los que entraron en efectivo suman al cajón
+  const cashMethodIds = new Set(methods.filter((m) => m.code === 'CASH').map((m) => m.id));
+  const accountCollections = accountPayments.reduce(
+    (acc, p) => acc.add(p.amount),
+    new Decimal(0),
+  );
+  const accountCollectionsCash = accountPayments
+    .filter((p) =>
+      p.paymentMethodId
+        ? cashMethodIds.has(p.paymentMethodId)
+        : p.paymentMethod.toLowerCase() === 'efectivo',
+    )
+    .reduce((acc, p) => acc.add(p.amount), new Decimal(0));
+
   const opening = new Decimal(initialAmount);
-  const calculatedCash = opening.add(cashSales).sub(totalExpenses).sub(totalRefunds);
-  const calculatedFinal = opening.add(totalSales).sub(totalExpenses).sub(totalRefunds);
+  const calculatedCash = opening
+    .add(cashSales)
+    .add(accountCollectionsCash)
+    .sub(totalExpenses)
+    .sub(totalRefunds);
+  const calculatedFinal = opening
+    .add(totalSales)
+    .add(accountCollections)
+    .sub(totalExpenses)
+    .sub(totalRefunds);
 
   return {
     totalSales,
@@ -101,6 +131,8 @@ export async function computeShiftTotals(
     totalExpenses,
     totalRefunds,
     exchangeCreditTotal,
+    accountCollections,
+    accountCollectionsCash,
     calculatedCash,
     calculatedFinal,
     paymentBreakdown,

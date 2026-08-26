@@ -6,7 +6,14 @@ import { prisma } from '../../config/database';
 import { successResponse, paginatedResponse } from '../../core/utils/response';
 import { parsePagination, buildPaginationMeta } from '../../core/utils/pagination';
 import { AppError } from '../../core/errors/AppError';
-import { CashShiftStatus, SaleStatus, StockMovementType, SaleReturnType, Prisma } from '@prisma/client';
+import {
+  CashShiftStatus,
+  CustomerReceivableStatus,
+  Prisma,
+  SaleReturnType,
+  SaleStatus,
+  StockMovementType,
+} from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { formatSaleNumber, SEQUENCE_ENTITIES } from '../../shared/constants';
 import { recalculateClosedShift } from '../cash-shifts/cash-shift.service';
@@ -286,15 +293,58 @@ saleRouter.post('/', requirePermission('sales:create'), asyncHandler(async (req,
     const creditPayment = finalPayments.find((p) => methodMap.get(p.paymentMethodId) === 'CREDIT_ACCOUNT');
     if (creditPayment) {
       if (!customerId) throw AppError.validation('Cuenta corriente requiere que se seleccione un cliente');
-      await tx.customerReceivable.create({
+
+      const debt = new Decimal(creditPayment.amount);
+      const receivable = await tx.customerReceivable.create({
         data: {
           tenantId: req.tenantId,
           customerId,
           saleId: newSale.id,
-          originalAmount: new Decimal(creditPayment.amount),
-          remainingAmount: new Decimal(creditPayment.amount),
+          originalAmount: debt,
+          remainingAmount: debt,
         },
       });
+
+      // Si el cliente tiene saldo a favor, la deuda se cancela contra ese saldo.
+      // El dinero ya entró a la caja cuando hizo el ingreso a cuenta.
+      const customer = await tx.customer.findUnique({
+        where: { id: customerId },
+        select: { creditBalance: true },
+      });
+      const available = new Decimal(customer?.creditBalance ?? 0);
+
+      if (available.gt(0)) {
+        const applied = Decimal.min(available, debt);
+        const remaining = debt.sub(applied);
+
+        await tx.customerReceivable.update({
+          where: { id: receivable.id },
+          data: {
+            paidAmount: applied,
+            remainingAmount: remaining,
+            status: remaining.lte(0)
+              ? CustomerReceivableStatus.PAID
+              : CustomerReceivableStatus.PARTIAL,
+          },
+        });
+
+        await tx.customerPayment.create({
+          data: {
+            tenantId: req.tenantId,
+            customerId,
+            receivableId: receivable.id,
+            amount: applied,
+            paymentMethod: 'Saldo a favor',
+            notes: `Aplicado automáticamente a la venta ${saleNumber}`,
+            createdById: userId,
+          },
+        });
+
+        await tx.customer.update({
+          where: { id: customerId },
+          data: { creditBalance: { decrement: applied } },
+        });
+      }
     }
 
     // Descontar stock y crear StockMovements (solo productos con tracksStock)
@@ -386,6 +436,36 @@ saleRouter.post('/:id/cancel', requirePermission('sales:cancel'), asyncHandler(a
           createdById: req.user!.sub,
         },
       });
+    }
+
+    // La deuda de cuenta corriente se anula. Lo que ya se había cobrado
+    // (incluido el saldo a favor aplicado) vuelve a quedar a favor del cliente.
+    const receivable = await tx.customerReceivable.findFirst({
+      where: { saleId: sale.id, tenantId: req.tenantId },
+      include: { payments: { select: { id: true, amount: true } } },
+    });
+
+    if (receivable) {
+      const refunded = receivable.payments.reduce(
+        (acc, p) => acc.add(p.amount),
+        new Decimal(0),
+      );
+
+      if (receivable.payments.length > 0) {
+        await tx.customerPayment.updateMany({
+          where: { id: { in: receivable.payments.map((p) => p.id) } },
+          data: { receivableId: null },
+        });
+      }
+
+      if (refunded.gt(0)) {
+        await tx.customer.update({
+          where: { id: receivable.customerId },
+          data: { creditBalance: { increment: refunded } },
+        });
+      }
+
+      await tx.customerReceivable.delete({ where: { id: receivable.id } });
     }
 
     await tx.sale.update({

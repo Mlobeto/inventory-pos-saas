@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Search, Edit2, Trash2, FileText, CreditCard } from 'lucide-react';
@@ -14,9 +14,9 @@ import {
   type Customer,
   type CustomerType,
   type CreateCustomerDto,
-  type CustomerReceivable,
   type CreatePaymentDto,
 } from '../api/customersApi';
+import { getCollectionMethods } from '@/modules/payment-methods/api/paymentMethodsApi';
 import { Button } from '@/shared/components/ui/Button';
 import { Input } from '@/shared/components/ui/Input';
 import { Modal } from '@/shared/components/ui/Modal';
@@ -40,7 +40,7 @@ const TYPE_BADGE_COLORS: Record<CustomerType, string> = {
   FACTURABLE: 'bg-green-100 text-green-700',
 };
 
-const PAYMENT_METHODS = ['Efectivo', 'Transferencia', 'Tarjeta', 'Cheque', 'Otro'];
+const ACCOUNT_TARGET = 'ACCOUNT';
 
 function fmt(amount: string | number) {
   return `$${parseFloat(String(amount)).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
@@ -66,11 +66,11 @@ export default function CustomersPage() {
   // Estado para modal de cobro
   const [cobroCustomer, setCobroCustomer] = useState<Customer | null>(null);
   const [cobroAmount, setCobroAmount] = useState('');
-  const [cobroMethod, setCobroMethod] = useState('Efectivo');
+  const [cobroMethodId, setCobroMethodId] = useState('');
   const [cobroReference, setCobroReference] = useState('');
   const [cobroNotes, setCobroNotes] = useState('');
   const [cobroError, setCobroError] = useState('');
-  const [selectedReceivable, setSelectedReceivable] = useState<CustomerReceivable | null>(null);
+  const [cobroTarget, setCobroTarget] = useState<string>(ACCOUNT_TARGET);
 
   const { data, isLoading } = useQuery({
     queryKey: ['customers', page, search, typeFilter],
@@ -125,42 +125,75 @@ export default function CustomersPage() {
     enabled: !!cobroCustomer,
   });
 
+  const { data: collectionMethods = [] } = useQuery({
+    queryKey: ['collection-methods'],
+    queryFn: getCollectionMethods,
+  });
+
+  useEffect(() => {
+    if (!cobroMethodId && collectionMethods.length > 0) {
+      setCobroMethodId(
+        collectionMethods.find((m) => m.code === 'CASH')?.id ?? collectionMethods[0].id,
+      );
+    }
+  }, [collectionMethods, cobroMethodId]);
+
   const cobroMut = useMutation({
     mutationFn: (dto: CreatePaymentDto) => createCustomerPayment(cobroCustomer!.id, dto),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['customer-receivables'] });
+      queryClient.invalidateQueries({ queryKey: ['customer-statement'] });
+      queryClient.invalidateQueries({ queryKey: ['cash-shift-current'] });
       closeCobroModal();
     },
     onError: (e: Error) => setCobroError(e.message),
   });
 
+  const selectedReceivable =
+    cobroTarget === ACCOUNT_TARGET
+      ? null
+      : receivables?.find((r) => r.id === cobroTarget) ?? null;
+
+  const pendingBalance = (receivables ?? []).reduce(
+    (acc, r) => acc + parseFloat(r.remainingAmount),
+    0,
+  );
+  const cobroNum = parseFloat(cobroAmount);
+  const cobroCredit =
+    cobroTarget === ACCOUNT_TARGET && !isNaN(cobroNum) ? cobroNum - pendingBalance : 0;
+
   function openCobro(c: Customer) {
     setCobroCustomer(c);
     setCobroAmount('');
-    setCobroMethod('Efectivo');
     setCobroReference('');
     setCobroNotes('');
     setCobroError('');
-    setSelectedReceivable(null);
+    setCobroTarget(ACCOUNT_TARGET);
   }
 
   function closeCobroModal() {
     setCobroCustomer(null);
-    setSelectedReceivable(null);
+    setCobroTarget(ACCOUNT_TARGET);
     setCobroError('');
   }
 
   function handleCobroSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!selectedReceivable) { setCobroError('Seleccioná una cuenta'); return; }
     const num = parseFloat(cobroAmount);
     if (isNaN(num) || num <= 0) { setCobroError('Ingresá un monto válido'); return; }
-    if (num > parseFloat(selectedReceivable.remainingAmount)) {
+    if (selectedReceivable && num > parseFloat(selectedReceivable.remainingAmount)) {
       setCobroError(`El monto no puede superar el saldo ($${parseFloat(selectedReceivable.remainingAmount).toLocaleString('es-AR')})`);
       return;
     }
+    if (!cobroMethodId) { setCobroError('Elegí la forma de pago'); return; }
     setCobroError('');
-    cobroMut.mutate({ receivableId: selectedReceivable.id, amount: num, paymentMethod: cobroMethod, reference: cobroReference, notes: cobroNotes });
+    cobroMut.mutate({
+      receivableId: selectedReceivable?.id,
+      amount: num,
+      paymentMethodId: cobroMethodId,
+      reference: cobroReference,
+      notes: cobroNotes,
+    });
   }
 
   function openCreate() {
@@ -468,30 +501,33 @@ export default function CustomersPage() {
       >
         {receivablesLoading ? (
           <div className="py-8 text-center text-gray-400">Cargando cuentas...</div>
-        ) : !receivables || receivables.length === 0 ? (
-          <div className="py-8 text-center text-gray-500">
-            No hay cuentas pendientes para este cliente.
-          </div>
         ) : (
           <form onSubmit={handleCobroSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Cuenta a cobrar *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Aplicar a *</label>
               <select
-                value={selectedReceivable?.id ?? ''}
+                value={cobroTarget}
                 onChange={(e) => {
-                  const r = receivables.find((x) => x.id === e.target.value) ?? null;
-                  setSelectedReceivable(r);
-                  if (r) setCobroAmount(r.remainingAmount);
+                  setCobroTarget(e.target.value);
+                  const r = receivables?.find((x) => x.id === e.target.value);
+                  setCobroAmount(r ? r.remainingAmount : '');
                 }}
                 className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
               >
-                <option value="">Seleccionar...</option>
-                {receivables.map((r) => (
+                <option value={ACCOUNT_TARGET}>
+                  A cuenta — deuda pendiente: {fmt(pendingBalance)}
+                </option>
+                {(receivables ?? []).map((r) => (
                   <option key={r.id} value={r.id}>
                     Venta #{r.sale.saleNumber} — Pendiente: {fmt(r.remainingAmount)}
                   </option>
                 ))}
               </select>
+              {cobroTarget === ACCOUNT_TARGET && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Se aplica a las cuentas más viejas. El excedente queda como saldo a favor.
+                </p>
+              )}
             </div>
 
             <Input
@@ -504,17 +540,26 @@ export default function CustomersPage() {
               leftAddon={<span className="text-gray-500 text-sm">$</span>}
             />
 
+            {cobroCredit > 0.005 && (
+              <div className="rounded-md bg-blue-50 border border-blue-200 p-3 text-sm text-blue-800">
+                Queda <strong>{fmt(cobroCredit)}</strong> como saldo a favor.
+              </div>
+            )}
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Forma de pago *</label>
               <select
-                value={cobroMethod}
-                onChange={(e) => setCobroMethod(e.target.value)}
+                value={cobroMethodId}
+                onChange={(e) => setCobroMethodId(e.target.value)}
                 className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
               >
-                {PAYMENT_METHODS.map((m) => (
-                  <option key={m} value={m}>{m}</option>
+                {collectionMethods.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
                 ))}
               </select>
+              <p className="text-xs text-gray-400 mt-1">
+                En efectivo ingresa a la caja del turno abierto.
+              </p>
             </div>
 
             <Input

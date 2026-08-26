@@ -148,6 +148,17 @@ cashShiftRouter.get('/:id', requirePermission('cash-shifts:read'), asyncHandler(
           sale: { select: { saleNumber: true } },
         },
       },
+      customerPayments: {
+        orderBy: { paidAt: 'asc' },
+        select: {
+          id: true,
+          amount: true,
+          paymentMethod: true,
+          paidAt: true,
+          receivableId: true,
+          customer: { select: { name: true } },
+        },
+      },
     },
   });
   if (!shift) throw AppError.notFound('Turno de caja');

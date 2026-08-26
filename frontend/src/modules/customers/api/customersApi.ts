@@ -120,12 +120,15 @@ export interface CustomerPayment {
 }
 
 export interface CustomerStatement {
-  customer: Pick<Customer, 'id' | 'name' | 'type' | 'phone' | 'email'>;
+  customer: Pick<Customer, 'id' | 'name' | 'type' | 'phone' | 'email'> & { creditBalance: string };
   receivables: CustomerReceivable[];
+  accountPayments: CustomerPayment[];
   summary: {
     totalDebt: string;
     totalPaid: string;
     balance: string;
+    creditBalance: string;
+    netBalance: string;
     pendingCount: number;
   };
 }
@@ -141,9 +144,11 @@ export async function getCustomerReceivables(id: string): Promise<CustomerReceiv
 }
 
 export interface CreatePaymentDto {
-  receivableId: string;
+  /** Sin receivableId el cobro se aplica a las deudas más viejas y el resto queda a favor */
+  receivableId?: string;
   amount: number;
-  paymentMethod: string;
+  paymentMethodId?: string;
+  paymentMethod?: string;
   reference?: string;
   notes?: string;
 }

@@ -354,9 +354,10 @@ model PaymentMethod {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant        Tenant         @relation(fields: [tenantId], references: [id])
-  productPrices ProductPrice[]
-  salePayments  SalePayment[]
+  tenant           Tenant            @relation(fields: [tenantId], references: [id])
+  productPrices    ProductPrice[]
+  salePayments     SalePayment[]
+  customerPayments CustomerPayment[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -528,10 +529,11 @@ model CashShift {
   tenant       Tenant        @relation(fields: [tenantId], references: [id])
   openedBy     User          @relation("ShiftOpenedBy", fields: [openedById], references: [id])
   closedBy     User?         @relation("ShiftClosedBy", fields: [closedById], references: [id])
-  sales        Sale[]
-  cashExpenses CashExpense[]
-  salePayments SalePayment[]
-  saleReturns  SaleReturn[]
+  sales            Sale[]
+  cashExpenses     CashExpense[]
+  salePayments     SalePayment[]
+  saleReturns      SaleReturn[]
+  customerPayments CustomerPayment[]
 
   @@index([tenantId])
   @@index([tenantId, status])
@@ -807,6 +809,7 @@ model Customer {
   address       String?
   notes         String?
   creditLimit   Decimal?     @db.Decimal(12, 2) // límite de crédito para VENDEDOR
+  creditBalance Decimal      @default(0) @db.Decimal(12, 2) // saldo a favor: dinero entregado sin imputar a una venta
   userId        String?      // link a usuario con acceso al portal (futuro)
   isActive      Boolean      @default(true)
 
@@ -857,25 +860,30 @@ model CustomerReceivable {
 // =============================================================================
 
 model CustomerPayment {
-  id             String @id @default(cuid())
-  tenantId       String
-  customerId     String
-  receivableId   String
-  amount         Decimal @db.Decimal(12, 2)
-  paymentMethod  String  // descripción libre: "Efectivo", "Transfer", etc.
-  reference      String?
-  notes          String?
-  createdById    String
+  id              String  @id @default(cuid())
+  tenantId        String
+  customerId      String
+  receivableId    String? // null = ingreso a cuenta, sin imputar a una venta
+  cashShiftId     String? // turno donde se registró el cobro
+  paymentMethodId String? // método real, para saber si entra al cajón
+  amount          Decimal @db.Decimal(12, 2)
+  paymentMethod   String  // descripción libre: "Efectivo", "Transfer", etc.
+  reference       String?
+  notes           String?
+  createdById     String
 
   paidAt    DateTime @default(now())
   createdAt DateTime @default(now())
 
-  tenant      Tenant             @relation(fields: [tenantId], references: [id])
-  customer    Customer           @relation(fields: [customerId], references: [id])
-  receivable  CustomerReceivable @relation(fields: [receivableId], references: [id])
-  createdBy   User               @relation(fields: [createdById], references: [id])
+  tenant        Tenant              @relation(fields: [tenantId], references: [id])
+  customer      Customer            @relation(fields: [customerId], references: [id])
+  receivable    CustomerReceivable? @relation(fields: [receivableId], references: [id])
+  cashShift     CashShift?          @relation(fields: [cashShiftId], references: [id])
+  method        PaymentMethod?      @relation(fields: [paymentMethodId], references: [id])
+  createdBy     User                @relation(fields: [createdById], references: [id])
 
   @@index([tenantId])
   @@index([tenantId, customerId])
   @@index([receivableId])
+  @@index([cashShiftId])
 }

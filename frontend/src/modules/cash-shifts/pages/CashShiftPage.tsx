@@ -443,6 +443,9 @@ function CloseShiftModal({
   );
   const exchangeCreditBreakdown = breakdown.find((b) => b.paymentMethodCode === 'EXCHANGE_CREDIT');
   const cashBreakdown = breakdown.find((b) => b.paymentMethodCode === 'CASH');
+  const accountCollectionsOther =
+    parseFloat(shift.summary?.accountCollections ?? '0') -
+    parseFloat(shift.summary?.accountCollectionsCash ?? '0');
 
   function handleConfirm() {
     const val = parseFloat(declared);
@@ -466,6 +469,16 @@ function CloseShiftModal({
             <span className="font-medium text-green-600">{fmt(cashBreakdown?._sum.amount ?? '0')}</span>
           </div>
 
+          {/* Cobros de cuenta corriente en efectivo */}
+          {parseFloat(shift.summary?.accountCollectionsCash ?? '0') > 0 && (
+            <div className="flex justify-between">
+              <span className="text-gray-500">Cobros de cuenta corriente (efectivo)</span>
+              <span className="font-medium text-green-600">
+                {fmt(shift.summary?.accountCollectionsCash)}
+              </span>
+            </div>
+          )}
+
           {/* Otros métodos de pago (no suman al saldo físico) */}
           {nonCashBreakdown.length > 0 && (
             <>
@@ -485,6 +498,13 @@ function CloseShiftModal({
             <div className="flex justify-between pl-2 mt-1">
               <span className="text-amber-700">Crédito por cambio (virtual)</span>
               <span className="font-medium text-amber-800">{fmt(exchangeCreditBreakdown._sum.amount)}</span>
+            </div>
+          )}
+
+          {accountCollectionsOther > 0 && (
+            <div className="flex justify-between pl-2">
+              <span className="text-gray-500">Cobros de cuenta corriente (otros medios)</span>
+              <span className="font-medium text-gray-700">{fmt(accountCollectionsOther)}</span>
             </div>
           )}
 
@@ -648,6 +668,9 @@ function ShiftDetailModal({
   const totalRefunds = parseFloat(summary?.totalRefunds ?? '0');
   const exchangeCreditTotal = parseFloat(summary?.exchangeCreditTotal ?? '0');
   const expectedCash = parseFloat(summary?.calculatedCash ?? shift.initialAmount);
+  const accountCollectionsCash = parseFloat(summary?.accountCollectionsCash ?? '0');
+  const accountCollectionsOther =
+    parseFloat(summary?.accountCollections ?? '0') - accountCollectionsCash;
 
   const nonCashBreakdown = (summary?.paymentBreakdown ?? []).filter(
     (b) =>
@@ -689,6 +712,12 @@ function ShiftDetailModal({
             <span className="text-gray-500">Ventas en efectivo</span>
             <span className="font-medium text-green-700">{fmt(cashSales)}</span>
           </div>
+          {accountCollectionsCash > 0 && (
+            <div className="flex justify-between">
+              <span className="text-gray-500">Cobros de cuenta corriente (efectivo)</span>
+              <span className="font-medium text-green-700">{fmt(accountCollectionsCash)}</span>
+            </div>
+          )}
           {totalExpenses > 0 && (
             <div className="flex justify-between">
               <span className="text-gray-500">Gastos</span>
@@ -724,7 +753,7 @@ function ShiftDetailModal({
             </>
           )}
 
-          {(nonCashBreakdown.length > 0 || exchangeCreditTotal > 0) && (
+          {(nonCashBreakdown.length > 0 || exchangeCreditTotal > 0 || accountCollectionsOther > 0.005) && (
             <div className="border-t border-gray-200 pt-2 space-y-2">
               <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
                 Otros cobros (no ingresan a caja)
@@ -739,6 +768,12 @@ function ShiftDetailModal({
                 <div className="flex justify-between pl-2">
                   <span className="text-amber-700">Crédito por cambio (virtual)</span>
                   <span className="font-medium text-amber-800">{fmt(exchangeCreditTotal)}</span>
+                </div>
+              )}
+              {accountCollectionsOther > 0.005 && (
+                <div className="flex justify-between pl-2">
+                  <span className="text-gray-500">Cobros de cuenta corriente (otros medios)</span>
+                  <span className="font-medium text-gray-700">{fmt(accountCollectionsOther)}</span>
                 </div>
               )}
             </div>
@@ -824,6 +859,39 @@ function ShiftDetailModal({
                       <td className="px-4 py-2 font-mono text-gray-700">{r.sale.saleNumber}</td>
                       <td className="px-4 py-2 text-gray-500">{r.reason}</td>
                       <td className="px-4 py-2 text-right text-red-600 font-medium">-{fmt(r.totalAmount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Cobros de cuenta corriente */}
+        {shift.customerPayments && shift.customerPayments.length > 0 && (
+          <div>
+            <h4 className="text-sm font-semibold text-gray-700 mb-2">
+              Cobros de cuenta corriente ({shift.customerPayments.length})
+            </h4>
+            <div className="border border-gray-200 rounded-lg overflow-hidden text-sm">
+              <table className="w-full">
+                <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+                  <tr>
+                    <th className="text-left px-4 py-2">Cliente</th>
+                    <th className="text-left px-4 py-2">Forma de pago</th>
+                    <th className="text-left px-4 py-2">Aplicado a</th>
+                    <th className="text-right px-4 py-2">Monto</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {shift.customerPayments.map((p) => (
+                    <tr key={p.id}>
+                      <td className="px-4 py-2 text-gray-700">{p.customer.name}</td>
+                      <td className="px-4 py-2 text-gray-500">{p.paymentMethod}</td>
+                      <td className="px-4 py-2 text-gray-400">
+                        {p.receivableId ? 'Venta a cuenta' : 'A cuenta / saldo a favor'}
+                      </td>
+                      <td className="px-4 py-2 text-right text-green-700 font-medium">{fmt(p.amount)}</td>
                     </tr>
                   ))}
                 </tbody>

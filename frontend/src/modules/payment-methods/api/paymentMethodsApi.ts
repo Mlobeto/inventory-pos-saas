@@ -24,6 +24,19 @@ export async function getPaymentMethods(): Promise<PaymentMethod[]> {
   return res.data.data;
 }
 
+/** No sirven para cobrar: son la deuda misma o un crédito virtual */
+const NON_COLLECTABLE_CODES = new Set(['CREDIT_ACCOUNT', 'EXCHANGE_CREDIT']);
+
+/** Métodos con los que se puede cobrar una cuenta corriente */
+export async function getCollectionMethods(): Promise<PaymentMethod[]> {
+  const all = await getPaymentMethods();
+  return all
+    .filter((m) => m.isActive)
+    .filter((m) => m.code === 'CASH' || !m.isPriceTier)
+    .filter((m) => !NON_COLLECTABLE_CODES.has(m.code))
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
 const PRICE_TIER_CODES = new Set(['WHOLESALE', 'VENDEDOR', 'CASH', 'PUBLIC']);
 
 /** Solo los 4 que se usan como listas de precio en productos */

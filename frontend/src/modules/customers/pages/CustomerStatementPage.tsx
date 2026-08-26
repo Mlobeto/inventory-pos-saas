@@ -1,8 +1,16 @@
-import { useState, useRef, useLayoutEffect } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, CreditCard, Receipt, CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import {
+  ArrowLeft,
+  CreditCard,
+  Receipt,
+  CheckCircle,
+  Clock,
+  AlertCircle,
+  PiggyBank,
+} from 'lucide-react';
 import {
   getCustomerStatement,
   createCustomerPayment,
@@ -10,6 +18,7 @@ import {
   type CustomerReceivable,
   type CreatePaymentDto,
 } from '../api/customersApi';
+import { getCollectionMethods } from '@/modules/payment-methods/api/paymentMethodsApi';
 import { Button } from '@/shared/components/ui/Button';
 import { Modal } from '@/shared/components/ui/Modal';
 import { Input } from '@/shared/components/ui/Input';
@@ -22,8 +31,6 @@ const STATUS_CONFIG = {
   PARTIAL: { label: 'Parcial', icon: AlertCircle, className: 'text-orange-600 bg-orange-50' },
   PAID: { label: 'Saldado', icon: CheckCircle, className: 'text-green-600 bg-green-50' },
 };
-
-const PAYMENT_METHODS = ['Efectivo', 'Transferencia', 'Tarjeta', 'Cheque', 'Otro'];
 
 function fmt(amount: string | number) {
   return `$${parseFloat(String(amount)).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
@@ -119,62 +126,101 @@ function ProductTooltip({ details }: { details: CustomerReceivable['sale']['deta
 
 interface PayModalProps {
   customerId: string;
-  receivable: CustomerReceivable;
+  /** null = cobro a cuenta: se aplica a las deudas más viejas y el resto queda a favor */
+  receivable: CustomerReceivable | null;
+  pendingBalance: number;
   onClose: () => void;
 }
 
-function PayModal({ customerId, receivable, onClose }: PayModalProps) {
+function PayModal({ customerId, receivable, pendingBalance, onClose }: PayModalProps) {
   const queryClient = useQueryClient();
-  const [amount, setAmount] = useState(receivable.remainingAmount);
-  const [method, setMethod] = useState('Efectivo');
+  const [amount, setAmount] = useState(receivable ? receivable.remainingAmount : '');
+  const [methodId, setMethodId] = useState('');
   const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState('');
+
+  const { data: methods = [] } = useQuery({
+    queryKey: ['collection-methods'],
+    queryFn: getCollectionMethods,
+  });
+
+  useEffect(() => {
+    if (!methodId && methods.length > 0) {
+      setMethodId(methods.find((m) => m.code === 'CASH')?.id ?? methods[0].id);
+    }
+  }, [methods, methodId]);
 
   const mut = useMutation({
     mutationFn: (dto: CreatePaymentDto) => createCustomerPayment(customerId, dto),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['customer-statement', customerId] });
+      queryClient.invalidateQueries({ queryKey: ['cash-shift-current'] });
       onClose();
     },
     onError: (e: Error) => setError(e.message),
   });
 
+  const num = parseFloat(amount);
+  const credit = !receivable && !isNaN(num) ? num - pendingBalance : 0;
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const num = parseFloat(amount);
     if (isNaN(num) || num <= 0) {
       setError('Ingresá un monto válido');
       return;
     }
-    if (num > parseFloat(receivable.remainingAmount)) {
+    if (receivable && num > parseFloat(receivable.remainingAmount)) {
       setError(`El monto no puede superar el saldo pendiente (${fmt(receivable.remainingAmount)})`);
       return;
     }
+    if (!methodId) {
+      setError('Elegí la forma de pago');
+      return;
+    }
     setError('');
-    mut.mutate({ receivableId: receivable.id, amount: num, paymentMethod: method, reference, notes });
+    mut.mutate({
+      receivableId: receivable?.id,
+      amount: num,
+      paymentMethodId: methodId,
+      reference,
+      notes,
+    });
   }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="bg-gray-50 rounded-md p-3 text-sm">
-        <div className="flex justify-between">
-          <span className="text-gray-600">Venta</span>
-          <span className="font-medium">{receivable.sale.saleNumber}</span>
+      {receivable ? (
+        <div className="bg-gray-50 rounded-md p-3 text-sm">
+          <div className="flex justify-between">
+            <span className="text-gray-600">Venta</span>
+            <span className="font-medium">{receivable.sale.saleNumber}</span>
+          </div>
+          <div className="flex justify-between mt-1">
+            <span className="text-gray-600">Deuda original</span>
+            <span>{fmt(receivable.originalAmount)}</span>
+          </div>
+          <div className="flex justify-between mt-1">
+            <span className="text-gray-600">Ya pagado</span>
+            <span>{fmt(receivable.paidAmount)}</span>
+          </div>
+          <div className="flex justify-between mt-1 font-semibold text-red-700">
+            <span>Saldo pendiente</span>
+            <span>{fmt(receivable.remainingAmount)}</span>
+          </div>
         </div>
-        <div className="flex justify-between mt-1">
-          <span className="text-gray-600">Deuda original</span>
-          <span>{fmt(receivable.originalAmount)}</span>
+      ) : (
+        <div className="bg-gray-50 rounded-md p-3 text-sm space-y-1">
+          <div className="flex justify-between">
+            <span className="text-gray-600">Deuda pendiente</span>
+            <span className="font-medium">{fmt(pendingBalance)}</span>
+          </div>
+          <p className="text-xs text-gray-500">
+            El monto se aplica primero a las cuentas más viejas. Lo que sobre queda como saldo
+            a favor del cliente.
+          </p>
         </div>
-        <div className="flex justify-between mt-1">
-          <span className="text-gray-600">Ya pagado</span>
-          <span>{fmt(receivable.paidAmount)}</span>
-        </div>
-        <div className="flex justify-between mt-1 font-semibold text-red-700">
-          <span>Saldo pendiente</span>
-          <span>{fmt(receivable.remainingAmount)}</span>
-        </div>
-      </div>
+      )}
 
       <Input
         label="Monto a cobrar *"
@@ -186,17 +232,27 @@ function PayModal({ customerId, receivable, onClose }: PayModalProps) {
         leftAddon={<span className="text-gray-500 text-sm">$</span>}
       />
 
+      {credit > 0.005 && (
+        <div className="flex items-start gap-2 rounded-md bg-blue-50 border border-blue-200 p-3 text-sm text-blue-800">
+          <PiggyBank className="h-4 w-4 mt-0.5 flex-shrink-0" />
+          <span>Queda <strong>{fmt(credit)}</strong> como saldo a favor.</span>
+        </div>
+      )}
+
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">Forma de pago *</label>
         <select
-          value={method}
-          onChange={(e) => setMethod(e.target.value)}
+          value={methodId}
+          onChange={(e) => setMethodId(e.target.value)}
           className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
         >
-          {PAYMENT_METHODS.map((m) => (
-            <option key={m} value={m}>{m}</option>
+          {methods.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
           ))}
         </select>
+        <p className="text-xs text-gray-400 mt-1">
+          En efectivo ingresa a la caja del turno abierto.
+        </p>
       </div>
 
       <Input
@@ -231,7 +287,7 @@ export default function CustomerStatementPage() {
   const canCollect = useAuthStore(
     (s) => s.hasPermission('customers:collect') || s.hasPermission('customers:write'),
   );
-  const [payTarget, setPayTarget] = useState<CustomerReceivable | null>(null);
+  const [payTarget, setPayTarget] = useState<CustomerReceivable | 'account' | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['customer-statement', id],
@@ -255,7 +311,9 @@ export default function CustomerStatementPage() {
     );
   }
 
-  const { customer, receivables, summary } = data;
+  const { customer, receivables, accountPayments, summary } = data;
+  const creditBalance = parseFloat(summary.creditBalance ?? '0');
+  const pendingBalance = parseFloat(summary.balance);
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -274,10 +332,19 @@ export default function CustomerStatementPage() {
             {customer.email && <> · {customer.email}</>}
           </p>
         </div>
+        {canCollect && (
+          <Button
+            className="ml-auto"
+            leftIcon={<CreditCard className="h-4 w-4" />}
+            onClick={() => setPayTarget('account')}
+          >
+            Cobrar a cuenta
+          </Button>
+        )}
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <p className="text-xs text-gray-500 uppercase tracking-wide">Deuda total</p>
           <p className="text-2xl font-bold text-gray-900 mt-1">{fmt(summary.totalDebt)}</p>
@@ -290,7 +357,7 @@ export default function CustomerStatementPage() {
           <p className="text-xs text-gray-500 uppercase tracking-wide">Saldo pendiente</p>
           <p
             className={`text-2xl font-bold mt-1 ${
-              parseFloat(summary.balance) > 0 ? 'text-red-700' : 'text-green-700'
+              pendingBalance > 0 ? 'text-red-700' : 'text-green-700'
             }`}
           >
             {fmt(summary.balance)}
@@ -299,7 +366,38 @@ export default function CustomerStatementPage() {
             <p className="text-xs text-gray-400 mt-0.5">{summary.pendingCount} cuenta(s) pendiente(s)</p>
           )}
         </div>
+        <div className="bg-white border border-blue-200 rounded-lg p-4">
+          <p className="text-xs text-gray-500 uppercase tracking-wide">Saldo a favor</p>
+          <p className="text-2xl font-bold text-blue-700 mt-1">{fmt(creditBalance)}</p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Se usa automáticamente en la próxima venta a cuenta
+          </p>
+        </div>
       </div>
+
+      {/* Account payments (sin venta asociada) */}
+      {accountPayments && accountPayments.length > 0 && (
+        <div className="bg-white border border-blue-200 rounded-lg overflow-hidden">
+          <div className="px-4 py-3 border-b border-blue-100 bg-blue-50 flex items-center gap-2">
+            <PiggyBank className="h-4 w-4 text-blue-700" />
+            <h2 className="text-sm font-semibold text-blue-900">Ingresos a cuenta</h2>
+          </div>
+          <ul className="divide-y divide-gray-100">
+            {accountPayments.map((p) => (
+              <li key={p.id} className="flex justify-between px-4 py-2 text-sm">
+                <span className="text-gray-600">
+                  {new Date(p.paidAt).toLocaleDateString('es-AR')} · {p.paymentMethod}
+                  {p.reference && <> · ref: {p.reference}</>}
+                  {p.createdBy && (
+                    <> · por {p.createdBy.firstName} {p.createdBy.lastName}</>
+                  )}
+                </span>
+                <span className="font-medium text-green-700">{fmt(p.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Receivables list */}
       {receivables.length === 0 ? (
@@ -416,13 +514,14 @@ export default function CustomerStatementPage() {
       <Modal
         isOpen={!!payTarget}
         onClose={() => setPayTarget(null)}
-        title="Registrar cobro"
+        title={payTarget === 'account' ? 'Cobrar a cuenta' : 'Registrar cobro'}
         size="sm"
       >
         {payTarget && (
           <PayModal
             customerId={id!}
-            receivable={payTarget}
+            receivable={payTarget === 'account' ? null : payTarget}
+            pendingBalance={pendingBalance}
             onClose={() => setPayTarget(null)}
           />
         )}

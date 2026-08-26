@@ -9,10 +9,15 @@ import { AppError } from '../../core/errors/AppError';
 import { CashShiftStatus, SaleStatus, StockMovementType, SaleReturnType, Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { formatSaleNumber, SEQUENCE_ENTITIES } from '../../shared/constants';
+import { recalculateClosedShift } from '../cash-shifts/cash-shift.service';
 
 export const saleRouter = Router();
 
 saleRouter.use(authMiddleware, tenancyMiddleware);
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
 
 saleRouter.get('/', requirePermission('sales:read'), asyncHandler(async (req, res) => {
   const pagination = parsePagination(req);
@@ -213,6 +218,18 @@ saleRouter.post('/', requirePermission('sales:create'), asyncHandler(async (req,
       linkedExchangeReturnId = saleReturn.id;
     }
 
+    // Se registra lo que se aplica a la venta, no lo que entregó el cliente:
+    // el excedente en efectivo es vuelto y no debe sumar a la caja.
+    let pendingToCover = totalAmount;
+    const appliedPayments: typeof finalPayments = [];
+    for (const payment of finalPayments) {
+      if (pendingToCover <= 0.005) break;
+      const applied = Math.min(payment.amount, pendingToCover);
+      appliedPayments.push({ ...payment, amount: round2(applied) });
+      pendingToCover = round2(pendingToCover - applied);
+    }
+    finalPayments = appliedPayments;
+
     // Crear la venta
     const newSale = await tx.sale.create({
       data: {
@@ -376,6 +393,11 @@ saleRouter.post('/:id/cancel', requirePermission('sales:cancel'), asyncHandler(a
       data: { status: SaleStatus.CANCELLED, cancelledAt: new Date(), cancelReason: reason },
     });
   });
+
+  // El arqueo del turno ya no incluye esta venta
+  if (sale.cashShiftId) {
+    await recalculateClosedShift(sale.cashShiftId);
+  }
 
   res.json(successResponse(null, 'Venta cancelada'));
 }));

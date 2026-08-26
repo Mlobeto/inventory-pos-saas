@@ -356,9 +356,9 @@ function ActiveShiftPanel({
         <div className="bg-brand-50 rounded-lg border border-brand-200 p-4">
           <div className="flex items-center gap-2 mb-2">
             <DollarSign className="h-4 w-4 text-brand-600" />
-            <span className="text-xs font-medium text-brand-700 uppercase tracking-wide">Saldo</span>
+            <span className="text-xs font-medium text-brand-700 uppercase tracking-wide">Efectivo en caja</span>
           </div>
-          <p className="text-lg font-bold text-brand-700">{fmt(summary?.calculatedFinal)}</p>
+          <p className="text-lg font-bold text-brand-700">{fmt(summary?.calculatedCash)}</p>
         </div>
       </div>
 
@@ -490,8 +490,15 @@ function CloseShiftModal({
 
           <div className="flex justify-between border-t border-gray-200 pt-2">
             <span className="text-gray-500">Total gastos</span>
-            <span className="font-medium text-red-500">{fmt(shift.summary?.totalExpenses)}</span>
+            <span className="font-medium text-red-500">-{fmt(shift.summary?.totalExpenses)}</span>
           </div>
+
+          {parseFloat(shift.summary?.totalRefunds ?? '0') > 0 && (
+            <div className="flex justify-between">
+              <span className="text-gray-500">Reintegros por devolución</span>
+              <span className="font-medium text-red-500">-{fmt(shift.summary?.totalRefunds)}</span>
+            </div>
+          )}
 
           <div className="flex justify-between border-t border-gray-200 pt-2">
             <span className="font-semibold text-gray-700">Efectivo calculado en caja</span>
@@ -635,14 +642,23 @@ function ShiftDetailModal({
     </Modal>
   );
 
-  const pmBreakdown = shift.salePayments.reduce<Record<string, { name: string; total: number; code: string }>>((acc, sp) => {
-    const code = sp.paymentMethod.code;
-    if (!acc[code]) acc[code] = { name: sp.paymentMethod.name, total: 0, code };
-    acc[code].total += parseFloat(sp.amount);
-    return acc;
-  }, {});
+  const summary = shift.summary;
+  const cashSales = parseFloat(summary?.cashSales ?? '0');
+  const totalExpenses = parseFloat(summary?.totalExpenses ?? '0');
+  const totalRefunds = parseFloat(summary?.totalRefunds ?? '0');
+  const exchangeCreditTotal = parseFloat(summary?.exchangeCreditTotal ?? '0');
+  const expectedCash = parseFloat(summary?.calculatedCash ?? shift.initialAmount);
 
-  const exchangeCreditTotal = pmBreakdown.EXCHANGE_CREDIT?.total ?? 0;
+  const nonCashBreakdown = (summary?.paymentBreakdown ?? []).filter(
+    (b) =>
+      b.paymentMethodCode !== 'CASH' &&
+      b.paymentMethodCode !== 'EXCHANGE_CREDIT' &&
+      parseFloat(b._sum.amount) !== 0,
+  );
+
+  const declaredAmount = shift.finalAmountDeclared ? parseFloat(shift.finalAmountDeclared) : null;
+  const difference = declaredAmount === null ? null : declaredAmount - expectedCash;
+  const refunds = shift.saleReturns?.filter((r) => r.type === 'REFUND') ?? [];
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Detalle del turno" size="lg">
@@ -665,50 +681,67 @@ function ShiftDetailModal({
 
         {/* Resumen */}
         <div className="bg-gray-50 rounded-lg p-4 text-sm space-y-2">
-          <div className="flex justify-between"><span className="text-gray-500">Apertura</span><span>{fmt(shift.initialAmount)}</span></div>
-          {Object.entries(pmBreakdown)
-            .filter(([code]) => code !== 'EXCHANGE_CREDIT')
-            .map(([code, v]) => (
-            <div key={code} className="flex justify-between">
-              <span className="text-gray-500">{v.name}</span>
-              <span className="font-medium text-green-700">{fmt(v.total)}</span>
-            </div>
-          ))}
-          {exchangeCreditTotal > 0 && (
-            <div className="flex justify-between">
-              <span className="text-amber-700">Crédito por cambio (virtual)</span>
-              <span className="font-medium text-amber-800">{fmt(exchangeCreditTotal)}</span>
-            </div>
-          )}
-          {shift.cashExpenses.length > 0 && (
+          <div className="flex justify-between">
+            <span className="text-gray-500">Apertura</span>
+            <span>{fmt(shift.initialAmount)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-500">Ventas en efectivo</span>
+            <span className="font-medium text-green-700">{fmt(cashSales)}</span>
+          </div>
+          {totalExpenses > 0 && (
             <div className="flex justify-between">
               <span className="text-gray-500">Gastos</span>
-              <span className="font-medium text-red-600">
-                -{fmt(shift.cashExpenses.reduce((a, e) => a + parseFloat(e.amount), 0))}
-              </span>
+              <span className="font-medium text-red-600">-{fmt(totalExpenses)}</span>
             </div>
           )}
-          {shift.finalAmountCalculated && (
-            <div className="flex justify-between border-t border-gray-200 pt-2">
-              <span className="font-semibold">Saldo calculado</span>
-              <span className="font-bold">{fmt(shift.finalAmountCalculated)}</span>
+          {totalRefunds > 0 && (
+            <div className="flex justify-between">
+              <span className="text-gray-500">Reintegros por devolución</span>
+              <span className="font-medium text-red-600">-{fmt(totalRefunds)}</span>
             </div>
           )}
-          {shift.finalAmountDeclared && (
+
+          <div className="flex justify-between border-t border-gray-200 pt-2">
+            <span className="font-semibold">Efectivo esperado en caja</span>
+            <span className="font-bold">{fmt(expectedCash)}</span>
+          </div>
+
+          {declaredAmount !== null && (
             <>
               <div className="flex justify-between">
                 <span className="text-gray-500">Declarado</span>
-                <span>{fmt(shift.finalAmountDeclared)}</span>
+                <span>{fmt(declaredAmount)}</span>
               </div>
-              {shift.difference && Math.abs(parseFloat(shift.difference)) > 0.01 && (
+              {difference !== null && Math.abs(difference) > 0.01 && (
                 <div className="flex justify-between">
                   <span className="text-gray-500">Diferencia</span>
-                  <span className={parseFloat(shift.difference) < 0 ? 'text-red-600 font-medium' : 'text-yellow-600 font-medium'}>
-                    {fmt(shift.difference)}
+                  <span className={difference < 0 ? 'text-red-600 font-medium' : 'text-yellow-600 font-medium'}>
+                    {fmt(difference)}
                   </span>
                 </div>
               )}
             </>
+          )}
+
+          {(nonCashBreakdown.length > 0 || exchangeCreditTotal > 0) && (
+            <div className="border-t border-gray-200 pt-2 space-y-2">
+              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                Otros cobros (no ingresan a caja)
+              </span>
+              {nonCashBreakdown.map((b) => (
+                <div key={b.paymentMethodId} className="flex justify-between pl-2">
+                  <span className="text-gray-500">{b.paymentMethodName}</span>
+                  <span className="font-medium text-gray-700">{fmt(b._sum.amount)}</span>
+                </div>
+              ))}
+              {exchangeCreditTotal > 0 && (
+                <div className="flex justify-between pl-2">
+                  <span className="text-amber-700">Crédito por cambio (virtual)</span>
+                  <span className="font-medium text-amber-800">{fmt(exchangeCreditTotal)}</span>
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -764,6 +797,33 @@ function ShiftDetailModal({
                       <td className="px-4 py-2 text-gray-700">{e.description}</td>
                       <td className="px-4 py-2 text-gray-400">{e.category ?? '—'}</td>
                       <td className="px-4 py-2 text-right text-red-600 font-medium">{fmt(e.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Reintegros por devolución */}
+        {refunds.length > 0 && (
+          <div>
+            <h4 className="text-sm font-semibold text-gray-700 mb-2">Reintegros por devolución ({refunds.length})</h4>
+            <div className="border border-gray-200 rounded-lg overflow-hidden text-sm">
+              <table className="w-full">
+                <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+                  <tr>
+                    <th className="text-left px-4 py-2">Venta</th>
+                    <th className="text-left px-4 py-2">Motivo</th>
+                    <th className="text-right px-4 py-2">Monto</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {refunds.map((r) => (
+                    <tr key={r.id}>
+                      <td className="px-4 py-2 font-mono text-gray-700">{r.sale.saleNumber}</td>
+                      <td className="px-4 py-2 text-gray-500">{r.reason}</td>
+                      <td className="px-4 py-2 text-right text-red-600 font-medium">-{fmt(r.totalAmount)}</td>
                     </tr>
                   ))}
                 </tbody>

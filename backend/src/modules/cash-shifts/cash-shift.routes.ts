@@ -8,17 +8,9 @@ import { parsePagination, buildPaginationMeta } from '../../core/utils/paginatio
 import { AppError } from '../../core/errors/AppError';
 import { CashShiftStatus, SaleStatus } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
+import { computeShiftTotals, syncClosedShiftArqueo } from './cash-shift.service';
 
 export const cashShiftRouter = Router();
-
-/** Pagos de ventas activas (excluye anuladas) */
-function activeSalePaymentsWhere(cashShiftId: string, tenantId: string) {
-  return {
-    cashShiftId,
-    tenantId,
-    sale: { status: { not: SaleStatus.CANCELLED } },
-  };
-}
 
 cashShiftRouter.use(authMiddleware, tenancyMiddleware);
 
@@ -64,59 +56,9 @@ cashShiftRouter.get('/current', requirePermission('cash-shifts:read'), asyncHand
   }
 
   // Calcular totales del turno en tiempo real
-  const paymentWhere = activeSalePaymentsWhere(shift.id, req.tenantId);
+  const totals = await computeShiftTotals(prisma, shift.id, req.tenantId, shift.initialAmount);
 
-  const [salesTotal, expensesTotal, paymentBreakdown, allMethods] = await Promise.all([
-    prisma.salePayment.aggregate({
-      where: paymentWhere,
-      _sum: { amount: true },
-    }),
-    prisma.cashExpense.aggregate({
-      where: { cashShiftId: shift.id, tenantId: req.tenantId },
-      _sum: { amount: true },
-    }),
-    prisma.salePayment.groupBy({
-      by: ['paymentMethodId'],
-      where: paymentWhere,
-      _sum: { amount: true },
-    }),
-    prisma.paymentMethod.findMany({
-      where: { tenantId: req.tenantId, isActive: true },
-      select: { id: true, code: true, name: true },
-    }),
-  ]);
-
-  const totalExpenses = expensesTotal._sum.amount ?? new Decimal(0);
-
-  const breakdownWithNames = paymentBreakdown.map((pb) => {
-    const method = allMethods.find((m) => m.id === pb.paymentMethodId);
-    return { ...pb, paymentMethodCode: method?.code ?? '', paymentMethodName: method?.name ?? '' };
-  });
-
-  // Crédito por devolución: es virtual (no entra ni sale efectivo real), se excluye del total
-  const exchangeCreditEntry = breakdownWithNames.find((b) => b.paymentMethodCode === 'EXCHANGE_CREDIT');
-  const exchangeCreditTotal = exchangeCreditEntry?._sum.amount
-    ? new Decimal(exchangeCreditEntry._sum.amount)
-    : new Decimal(0);
-  const totalSales = (salesTotal._sum.amount ?? new Decimal(0)).sub(exchangeCreditTotal);
-  const calculatedFinal = new Decimal(shift.initialAmount).add(totalSales).sub(totalExpenses);
-
-  // Efectivo calculado en caja = apertura + pagos en efectivo (CASH) - gastos
-  const cashMethodEntry = breakdownWithNames.find((b) => b.paymentMethodCode === 'CASH');
-  const cashSales = cashMethodEntry?._sum.amount ? new Decimal(cashMethodEntry._sum.amount) : new Decimal(0);
-  const calculatedCash = new Decimal(shift.initialAmount).add(cashSales).sub(totalExpenses);
-
-  res.json(successResponse({
-    ...shift,
-    summary: {
-      totalSales,
-      totalExpenses,
-      calculatedFinal,
-      calculatedCash,
-      exchangeCreditTotal,
-      paymentBreakdown: breakdownWithNames,
-    },
-  }));
+  res.json(successResponse({ ...shift, summary: totals }));
 }));
 
 // POST /api/cash-shifts/close — cierra el turno actual
@@ -132,35 +74,10 @@ cashShiftRouter.post('/close', requirePermission('cash-shifts:close'), asyncHand
   });
   if (!shift) throw AppError.shiftNotOpen();
 
-  // Calcular monto final
-  const paymentWhere = activeSalePaymentsWhere(shift.id, req.tenantId);
+  // Solo el efectivo (menos gastos y reintegros) forma el saldo físico de caja
+  const totals = await computeShiftTotals(prisma, shift.id, req.tenantId, shift.initialAmount);
 
-  const [salesTotal, expensesTotal, cashPaymentMethod] = await Promise.all([
-    prisma.salePayment.aggregate({
-      where: paymentWhere,
-      _sum: { amount: true },
-    }),
-    prisma.cashExpense.aggregate({
-      where: { cashShiftId: shift.id, tenantId: req.tenantId },
-      _sum: { amount: true },
-    }),
-    prisma.paymentMethod.findFirst({
-      where: { tenantId: req.tenantId, code: 'CASH' },
-      select: { id: true },
-    }),
-  ]);
-
-  // Solo pagos en efectivo (CASH) se suman al saldo físico de caja
-  const cashSalesTotal = cashPaymentMethod
-    ? (await prisma.salePayment.aggregate({
-        where: { ...paymentWhere, paymentMethodId: cashPaymentMethod.id },
-        _sum: { amount: true },
-      }))._sum.amount ?? new Decimal(0)
-    : new Decimal(0);
-
-  void (salesTotal._sum.amount ?? new Decimal(0)); // total ventas no se usa para el saldo físico de caja
-  const totalExpenses = expensesTotal._sum.amount ?? new Decimal(0);
-  const finalAmountCalculated = new Decimal(shift.initialAmount).add(cashSalesTotal).sub(totalExpenses);
+  const finalAmountCalculated = totals.calculatedCash;
   const declared = new Decimal(finalAmountDeclared);
   const difference = declared.sub(finalAmountCalculated);
 
@@ -220,8 +137,25 @@ cashShiftRouter.get('/:id', requirePermission('cash-shifts:read'), asyncHandler(
         where: { sale: { status: { not: SaleStatus.CANCELLED } } },
         include: { paymentMethod: { select: { code: true, name: true } } },
       },
+      saleReturns: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          type: true,
+          totalAmount: true,
+          reason: true,
+          createdAt: true,
+          sale: { select: { saleNumber: true } },
+        },
+      },
     },
   });
   if (!shift) throw AppError.notFound('Turno de caja');
-  res.json(successResponse(shift));
+
+  // Se recalcula con los datos vigentes: si después del cierre se anuló una venta,
+  // el saldo guardado quedaría desalineado con el detalle que se muestra.
+  const totals = await computeShiftTotals(prisma, shift.id, req.tenantId, shift.initialAmount);
+  await syncClosedShiftArqueo(shift, totals);
+
+  res.json(successResponse({ ...shift, summary: totals }));
 }));

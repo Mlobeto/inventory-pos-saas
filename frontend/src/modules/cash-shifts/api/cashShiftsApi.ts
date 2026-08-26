@@ -10,16 +10,13 @@ export interface PaymentBreakdownItem {
 
 export interface ShiftSummary {
   totalSales: string;
+  cashSales: string;
   totalExpenses: string;
+  totalRefunds: string;
   calculatedFinal: string;
   calculatedCash: string;
   exchangeCreditTotal?: string;
-  paymentBreakdown: Array<{
-    paymentMethodId: string;
-    paymentMethodCode: string;
-    paymentMethodName: string;
-    _sum: { amount: string };
-  }>;
+  paymentBreakdown: PaymentBreakdownItem[];
 }
 
 export interface CashExpense {
@@ -48,6 +45,7 @@ export interface CashShift {
 }
 
 export interface ShiftDetail extends CashShift {
+  summary: ShiftSummary;
   sales: Array<{
     id: string;
     saleNumber: string;
@@ -60,6 +58,14 @@ export interface ShiftDetail extends CashShift {
     id: string;
     amount: string;
     paymentMethod: { code: string; name: string };
+  }>;
+  saleReturns: Array<{
+    id: string;
+    type: 'REFUND' | 'EXCHANGE';
+    totalAmount: string;
+    reason: string;
+    createdAt: string;
+    sale: { saleNumber: string };
   }>;
 }
 

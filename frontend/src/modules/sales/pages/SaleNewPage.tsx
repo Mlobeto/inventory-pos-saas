@@ -48,6 +48,10 @@ function fmt(n: number): string {
   return `$${n.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
 }
 
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
 function getPrice(item: CartItem, priceListId: string): number {
   if (item.isMisc && item.customUnitPrice != null) return item.customUnitPrice;
   const pp = item.productPrices.find((p) => p.paymentMethodId === priceListId);
@@ -597,6 +601,20 @@ export default function SaleNewPage() {
       return;
     }
 
+    // Se registra lo aplicado a la venta: si el cliente entrega de más, la diferencia
+    // es vuelto y no debe quedar como cobro.
+    const amountToCover = exchangeReturnId
+      ? Math.max(0, totalAmount - exchangeCreditAmount)
+      : totalAmount;
+    let pendingToCover = amountToCover;
+    const appliedPayments: Array<{ methodId: string; amount: number; ref: string }> = [];
+    for (const p of validPayments) {
+      if (pendingToCover <= 0.005) break;
+      const applied = Math.min(parseFloat(p.amount), pendingToCover);
+      appliedPayments.push({ methodId: p.methodId, amount: round2(applied), ref: p.ref });
+      pendingToCover = round2(pendingToCover - applied);
+    }
+
     createMut.mutate({
       items: cart.map((item) => ({
         productId: item.productId,
@@ -607,9 +625,9 @@ export default function SaleNewPage() {
         appliedPriceListCode: item.isMisc ? 'MISC' : priceListCode,
         ...(item.isMisc && item.customName && { customName: item.customName }),
       })),
-      payments: validPayments.map((p) => ({
+      payments: appliedPayments.map((p) => ({
         paymentMethodId: p.methodId,
-        amount: parseFloat(p.amount),
+        amount: p.amount,
         reference: p.ref || undefined,
       })),
       notes: notes || undefined,

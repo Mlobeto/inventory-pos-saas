@@ -292,6 +292,8 @@ export async function createAfipInvoice(
       Concepto: 1,
       DocTipo: docType,
       DocNro: parseInt(docNumber, 10) || 0,
+      // parche: 5 = Consumidor Final solo si DocTipo es 99; con otro DocTipo falta la condición frente al IVA del cliente
+      ...(Number(docType) === 99 ? { CondicionIVAReceptorId: 5 } : {}),
       CbteDesde: nextNumber,
       CbteHasta: nextNumber,
       CbteFch: invoiceDateInt,
